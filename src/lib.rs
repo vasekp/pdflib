@@ -24,6 +24,9 @@ fn read_token<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -
         CharClass::Delim => {
             if (c == b'<' || c == b'>') && iter.next_if(|r| r.as_ref().is_ok_and(|c2| *c2 == c)).is_some() {
                 Ok([c, c].into())
+            } else if c == b'%' {
+                while iter.next_if(|r| r.as_ref().is_ok_and(|c| *c != b'\n' && *c != b'\r')).is_some() { }
+                Ok([b' '].into())
             } else {
                 Ok([c].into())
             }
@@ -73,16 +76,27 @@ mod tests {
 
     #[test]
     fn test_tokenizer() {
-        let input = "abc  <<g,%k\r\n";
+        let input = "abc  <<g,%k\r\nn";
         let cur = Cursor::new(input);
         let mut bytes = cur.bytes().peekable();
         assert_eq!(read_token(&mut bytes).unwrap(), b"abc");
         assert_eq!(read_token(&mut bytes).unwrap(), b" ");
         assert_eq!(read_token(&mut bytes).unwrap(), b"<<");
         assert_eq!(read_token(&mut bytes).unwrap(), b"g,");
-        assert_eq!(read_token(&mut bytes).unwrap(), b"%");
-        assert_eq!(read_token(&mut bytes).unwrap(), b"k");
         assert_eq!(read_token(&mut bytes).unwrap(), b" ");
+        assert_eq!(read_token(&mut bytes).unwrap(), b" ");
+        assert_eq!(read_token(&mut bytes).unwrap(), b"n");
         assert!(read_token(&mut bytes).is_err());
+
+        let input = "A%1\rB%2\nC";
+        let cur = Cursor::new(input);
+        let mut bytes = cur.bytes().peekable();
+        assert_eq!(read_token(&mut bytes).unwrap(), b"A");
+        assert_eq!(read_token(&mut bytes).unwrap(), b" ");
+        assert_eq!(read_token(&mut bytes).unwrap(), b" ");
+        assert_eq!(read_token(&mut bytes).unwrap(), b"B");
+        assert_eq!(read_token(&mut bytes).unwrap(), b" ");
+        assert_eq!(read_token(&mut bytes).unwrap(), b" ");
+        assert_eq!(read_token(&mut bytes).unwrap(), b"C");
     }
 }
