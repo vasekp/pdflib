@@ -60,8 +60,8 @@ struct Name(Vec<u8>);
 #[derive(Debug, PartialEq)]
 enum Object {
     Bool(bool),
-    Num(Number),
-    Str(Vec<u8>),
+    Number(Number),
+    String(Vec<u8>),
     Name(Name),
     Array(Vec<Object>),
     Dict(Vec<(Name, Object)>),
@@ -75,10 +75,26 @@ enum Number {
     Real(f64)
 }
 
+fn to_number(tok: &[u8]) -> Result<Number, ()> {
+    if tok.contains(&b'.') {
+        Ok(Number::Real(std::str::from_utf8(tok)
+            .map_err(|_| ())?
+            .parse::<f64>()
+            .map_err(|_| ())?))
+    } else {
+        Ok(Number::Int(std::str::from_utf8(tok)
+            .map_err(|_| ())?
+            .parse::<i64>()
+            .map_err(|_| ())?))
+    }
+}
+
 fn read_obj<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> std::io::Result<Object> {
     match &read_token_nonempty(iter)?[..] {
         b"true" => Ok(Object::Bool(true)),
         b"false" => Ok(Object::Bool(false)),
+        tk @ [b'0'..=b'9' | b'+' | b'-' | b'.', ..] => Ok(Object::Number(to_number(tk)
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Malformed number"))?)),
         _ => todo!()
     }
 }
@@ -146,10 +162,29 @@ mod tests {
 
     #[test]
     fn test_read_obj() {
-        let input = "true false";
+        let input = "true false 123 +17 -98 0 34.5 -3.62 +123.6 4. -.002 0.0";
         let cur = Cursor::new(input);
         let mut bytes = cur.bytes().peekable();
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(true));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(false));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Int(123)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Int(17)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Int(-98)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Int(0)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Real(34.5)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Real(-3.62)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Real(123.6)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Real(4.)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Real(-0.002)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Real(0.)));
+
+        let cur = Cursor::new("++1 1..0 .1. 1_ 1a true");
+        let mut bytes = cur.bytes().peekable();
+        assert!(read_obj(&mut bytes).is_err());
+        assert!(read_obj(&mut bytes).is_err());
+        assert!(read_obj(&mut bytes).is_err());
+        assert!(read_obj(&mut bytes).is_err());
+        assert!(read_obj(&mut bytes).is_err());
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(true));
     }
 }
