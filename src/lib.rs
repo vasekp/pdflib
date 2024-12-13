@@ -1,3 +1,6 @@
+use std::iter::Peekable;
+use std::io::{Read, Cursor};
+
 #[derive(Debug, PartialEq)]
 enum CharClass {
     Space,
@@ -11,6 +14,31 @@ impl CharClass {
             b'\x00' | b'\x09' | b'\x0A' | b'\x0C' | b'\x0D' | b'\x20' => CharClass::Space,
             b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%' => CharClass::Delim,
             _ => CharClass::Reg
+        }
+    }
+}
+
+fn read_token<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> std::io::Result<Vec<u8>> {
+    let c = iter.next().ok_or(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))??;
+    match CharClass::of(c) {
+        CharClass::Delim => {
+            if (c == b'<' || c == b'>') && iter.next_if(|r| r.as_ref().is_ok_and(|c2| *c2 == c)).is_some() {
+                Ok([c, c].into())
+            } else {
+                Ok([c].into())
+            }
+        },
+        CharClass::Space => {
+            while iter.next_if(|r| r.as_ref().is_ok_and(|c| CharClass::of(*c) == CharClass::Space)).is_some() { }
+            Ok([b' '].into())
+        },
+        CharClass::Reg => {
+            let mut ret = Vec::new();
+            ret.push(c);
+            while let Some(r) = iter.next_if(|r| r.as_ref().is_ok_and(|c| CharClass::of(*c) == CharClass::Reg)) {
+                ret.push(r?);
+            }
+            Ok(ret)
         }
     }
 }
@@ -41,5 +69,20 @@ mod tests {
         assert_eq!(CharClass::of(b'\''), CharClass::Reg);
         assert_eq!(CharClass::of(b'\"'), CharClass::Reg);
         assert_eq!(CharClass::of(b'\x08'), CharClass::Reg);
+    }
+
+    #[test]
+    fn test_tokenizer() {
+        let input = "abc  <<g,%k\r\n";
+        let cur = Cursor::new(input);
+        let mut bytes = cur.bytes().peekable();
+        assert_eq!(read_token(&mut bytes).unwrap(), b"abc");
+        assert_eq!(read_token(&mut bytes).unwrap(), b" ");
+        assert_eq!(read_token(&mut bytes).unwrap(), b"<<");
+        assert_eq!(read_token(&mut bytes).unwrap(), b"g,");
+        assert_eq!(read_token(&mut bytes).unwrap(), b"%");
+        assert_eq!(read_token(&mut bytes).unwrap(), b"k");
+        assert_eq!(read_token(&mut bytes).unwrap(), b" ");
+        assert!(read_token(&mut bytes).is_err());
     }
 }
