@@ -1,5 +1,6 @@
 use std::iter::Peekable;
 use std::io::{Read, Cursor};
+use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, PartialEq)]
 enum CharClass {
@@ -52,6 +53,36 @@ fn read_token_nonempty<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peeka
         if tk != b" " { return Ok(tk); }
     }
 }
+
+#[derive(Debug, PartialEq)]
+struct Name(Vec<u8>);
+
+#[derive(Debug, PartialEq)]
+enum Object {
+    Bool(bool),
+    Num(Number),
+    Str(Vec<u8>),
+    Name(Name),
+    Array(Vec<Object>),
+    Dict(Vec<(Name, Object)>),
+    Stream(Vec<(Name, Object)>, Vec<u8>),
+    Null
+}
+
+#[derive(Debug, PartialEq)]
+enum Number {
+    Int(i64),
+    Real(f64)
+}
+
+fn read_obj<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> std::io::Result<Object> {
+    match &read_token_nonempty(iter)?[..] {
+        b"true" => Ok(Object::Bool(true)),
+        b"false" => Ok(Object::Bool(false)),
+        _ => todo!()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -111,5 +142,14 @@ mod tests {
         let mut bytes = cur.bytes().peekable();
         assert_eq!(read_token_nonempty(&mut bytes).unwrap(), b"A");
         assert_eq!(read_token_nonempty(&mut bytes).unwrap(), b"B");
+    }
+
+    #[test]
+    fn test_read_obj() {
+        let input = "true false";
+        let cur = Cursor::new(input);
+        let mut bytes = cur.bytes().peekable();
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(true));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(false));
     }
 }
