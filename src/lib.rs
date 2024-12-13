@@ -46,6 +46,13 @@ fn read_token<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -
     }
 }
 
+fn read_token_nonempty<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> std::io::Result<Vec<u8>> {
+    loop {
+        let tk = read_token(iter)?;
+        if tk != b" " { return Ok(tk); }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +105,11 @@ mod tests {
         assert_eq!(read_token(&mut bytes).unwrap(), b" ");
         assert_eq!(read_token(&mut bytes).unwrap(), b" ");
         assert_eq!(read_token(&mut bytes).unwrap(), b"C");
+
+        let input = "A%1\r %2\nB";
+        let cur = Cursor::new(input);
+        let mut bytes = cur.bytes().peekable();
+        assert_eq!(read_token_nonempty(&mut bytes).unwrap(), b"A");
+        assert_eq!(read_token_nonempty(&mut bytes).unwrap(), b"B");
     }
 }
