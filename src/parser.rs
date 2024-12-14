@@ -105,6 +105,7 @@ fn read_obj(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
         tk @ [b'0'..=b'9' | b'+' | b'-' | b'.', ..] => Ok(Object::Number(to_number(tk)
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Malformed number"))?)),
         b"(" => read_lit_string(iter),
+        b"<" => read_hex_string(iter),
         _ => todo!()
     }
 }
@@ -152,6 +153,31 @@ fn read_lit_string(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
     }
     Ok(Object::String(ret))
 }
+
+fn read_hex_string(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
+    let mut msd = None;
+    let mut ret = Vec::new();
+    loop {
+        let c = iter.next_or_eof()?;
+        let dig = match c {
+            b'0'..=b'9' => c - b'0',
+            b'a'..=b'f' => c - b'a' + 10,
+            b'A'..=b'F' => c - b'A' + 10,
+            b'>' => {
+                if let Some(d) = msd { ret.push(d << 4); }
+                break;
+            },
+            d if CharClass::of(d) == CharClass::Space => continue,
+            _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "Malformed hex string"))
+        };
+        match msd {
+            None => msd = Some(dig),
+            Some(d) => { ret.push((d << 4) | dig); msd = None; }
+        }
+    }
+    Ok(Object::String(ret))
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -284,5 +310,19 @@ are the same.) (These two strings are the same.)");
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("@"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("\x053++"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("+x"));
+    }
+
+    #[test]
+    fn test_read_hex_string() {
+        let cur = Cursor::new("<4E6F762073686D6F7A206B6120706F702E> <901FA3> <901fa>");
+        let mut bytes = ByteIterator::from(cur.bytes());
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("Nov shmoz ka pop."));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::String([0x90, 0x1F, 0xA3].into()));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::String([0x90, 0x1F, 0xA0].into()));
+
+        let cur = Cursor::new("<61\r\n62> <61%comment\n>");
+        let mut bytes = ByteIterator::from(cur.bytes());
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("ab"));
+        assert!(read_obj(&mut bytes).is_err());
     }
 }
