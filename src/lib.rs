@@ -98,9 +98,65 @@ fn read_obj<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> 
         b"false" => Ok(Object::Bool(false)),
         tk @ [b'0'..=b'9' | b'+' | b'-' | b'.', ..] => Ok(Object::Number(to_number(tk)
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Malformed number"))?)),
+        b"(" => read_lit_string(iter),
         _ => todo!()
     }
 }
+
+impl Object {
+    fn new_string(s: &str) -> Object {
+        Object::String(s.bytes().collect())
+    }
+}
+
+fn read_lit_string<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> std::io::Result<Object> {
+    let mut ret = Vec::new();
+    let mut parens = 0;
+    loop {
+        match iter.next().ok_or(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?? {
+            b'\\' => {
+                let c = match iter.next().ok_or(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?? {
+                    b'n' => b'\x0a',
+                    b'r' => b'\x0d',
+                    b't' => b'\x09',
+                    b'b' => b'\x08',
+                    b'f' => b'\x0c',
+                    c @ (b'(' | b')' | b'\\') => c,
+                    d1 @ (b'0' ..= b'7') => {
+                        let d1 = d1 - b'0';
+                        let d2 = iter.next_if(|r| r.as_ref().is_ok_and(|c| *c >= b'0' && *c <= b'7'))
+                            .transpose()?
+                            .map(|c| c - b'0');
+                        let d3 = iter.next_if(|r| r.as_ref().is_ok_and(|c| *c >= b'0' && *c <= b'7'))
+                            .transpose()?
+                            .map(|c| c - b'0');
+                        match (d2, d3) {
+                            (Some(d2), Some(d3)) => (d1 << 6) + (d2 << 3) + d3,
+                            (Some(d2), None) => (d1 << 3) + d2,
+                            (None, None) => d1,
+                            _ => unreachable!()
+                        }
+                    },
+                    _ => continue
+                };
+                ret.push(c);
+            },
+            b'\r' => {
+                iter.next_if(|r| r.as_ref().is_ok_and(|c| *c == b'\n'));
+                ret.push(b'\n');
+            },
+            c => {
+                if c == b'(' { parens = parens + 1; }
+                if c == b')' {
+                    if parens == 0 { break; } else { parens = parens - 1; }
+                }
+                ret.push(c);
+            }
+        }
+    }
+    Ok(Object::String(ret))
+}
+
 
 
 #[cfg(test)]
@@ -192,5 +248,47 @@ mod tests {
         assert!(read_obj(&mut bytes).is_err());
         assert!(read_obj(&mut bytes).is_err());
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(true));
+    }
+
+    #[test]
+    fn test_read_lit_string() {
+        let cur = Cursor::new("(string) (new
+line) (parens() (*!&}^%etc).) () ((0)) (()");
+        let mut bytes = cur.bytes().peekable();
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("string"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("new\nline"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("parens() (*!&}^%etc)."));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string(""));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("(0)"));
+        assert!(read_obj(&mut bytes).is_err());
+
+        let cur = Cursor::new("(These \\
+two strings \\
+are the same.) (These two strings are the same.)");
+        let mut bytes = cur.bytes().peekable();
+        assert_eq!(read_obj(&mut bytes).unwrap(), read_obj(&mut bytes).unwrap());
+
+        let cur = Cursor::new("(1
+) (2\\n) (3\\r) (4\\r\\n)");
+        let mut bytes = cur.bytes().peekable();
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("1\n"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("2\n"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("3\r"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("4\r\n"));
+
+        let cur = Cursor::new("(1
+) (2\n) (3\r) (4\r\n)");
+        let mut bytes = cur.bytes().peekable();
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("1\n"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("2\n"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("3\n"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("4\n"));
+
+        let cur = Cursor::new("(\\157cta\\154) (\\500) (\\0053\\053\\53) (\\53x)");
+        let mut bytes = cur.bytes().peekable();
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("octal"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("@"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("\x053++"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("+x"));
     }
 }
