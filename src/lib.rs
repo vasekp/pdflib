@@ -76,6 +76,9 @@ enum Number {
 }
 
 fn to_number(tok: &[u8]) -> Result<Number, ()> {
+    if tok.contains(&b'e') || tok.contains(&b'E') {
+        return Err(());
+    }
     if tok.contains(&b'.') {
         Ok(Number::Real(std::str::from_utf8(tok)
             .map_err(|_| ())?
@@ -178,8 +181,11 @@ mod tests {
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Real(-0.002)));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Real(0.)));
 
-        let cur = Cursor::new("++1 1..0 .1. 1_ 1a true");
+        let cur = Cursor::new("++1 1..0 .1. 1_ 1a 16#FFFE . 6.023E23 true");
         let mut bytes = cur.bytes().peekable();
+        assert!(read_obj(&mut bytes).is_err());
+        assert!(read_obj(&mut bytes).is_err());
+        assert!(read_obj(&mut bytes).is_err());
         assert!(read_obj(&mut bytes).is_err());
         assert!(read_obj(&mut bytes).is_err());
         assert!(read_obj(&mut bytes).is_err());
