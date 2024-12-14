@@ -4,6 +4,31 @@ use std::fmt::{Debug, Formatter};
 
 use crate::base::*;
 
+struct ByteIterator<T: Iterator<Item = std::io::Result<u8>>>(Peekable<T>);
+
+trait ByteIteratorT {
+    fn next_or_eof(&mut self) -> std::io::Result<u8>;
+    fn next_if(&mut self, cond: impl FnOnce(u8) -> bool) -> Option<u8>;
+}
+
+impl<T: Iterator<Item = std::io::Result<u8>>> ByteIterator<T> {
+    fn from(iter: T) -> ByteIterator<T> {
+        ByteIterator(iter.peekable())
+    }
+}
+
+impl<T: Iterator<Item = std::io::Result<u8>>> ByteIteratorT for ByteIterator<T> {
+    fn next_or_eof(&mut self) -> std::io::Result<u8> {
+        self.0.next().ok_or(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?
+    }
+
+    fn next_if(&mut self, cond: impl FnOnce(u8) -> bool) -> Option<u8> {
+        self.0.next_if(|r| r.as_ref().is_ok_and(|c| cond(*c)))
+            .transpose()
+            .unwrap() // is_ok checked within next_if
+    }
+}
+
 #[derive(Debug, PartialEq)]
 enum CharClass {
     Space,
@@ -21,35 +46,35 @@ impl CharClass {
     }
 }
 
-fn read_token<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> std::io::Result<Vec<u8>> {
-    let c = iter.next().ok_or(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))??;
+fn read_token(iter: &mut impl ByteIteratorT) -> std::io::Result<Vec<u8>> {
+    let c = iter.next_or_eof()?;
     match CharClass::of(c) {
         CharClass::Delim => {
-            if (c == b'<' || c == b'>') && iter.next_if(|r| r.as_ref().is_ok_and(|c2| *c2 == c)).is_some() {
+            if (c == b'<' || c == b'>') && iter.next_if(|c2| c2 == c).is_some() {
                 Ok([c, c].into())
             } else if c == b'%' {
-                while iter.next_if(|r| r.as_ref().is_ok_and(|c| *c != b'\n' && *c != b'\r')).is_some() { }
+                while iter.next_if(|c| c != b'\n' && c != b'\r').is_some() { }
                 Ok([b' '].into())
             } else {
                 Ok([c].into())
             }
         },
         CharClass::Space => {
-            while iter.next_if(|r| r.as_ref().is_ok_and(|c| CharClass::of(*c) == CharClass::Space)).is_some() { }
+            while iter.next_if(|c| CharClass::of(c) == CharClass::Space).is_some() { }
             Ok([b' '].into())
         },
         CharClass::Reg => {
             let mut ret = Vec::new();
             ret.push(c);
-            while let Some(r) = iter.next_if(|r| r.as_ref().is_ok_and(|c| CharClass::of(*c) == CharClass::Reg)) {
-                ret.push(r?);
+            while let Some(r) = iter.next_if(|c| CharClass::of(c) == CharClass::Reg) {
+                ret.push(r);
             }
             Ok(ret)
         }
     }
 }
 
-fn read_token_nonempty<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> std::io::Result<Vec<u8>> {
+fn read_token_nonempty(iter: &mut impl ByteIteratorT) -> std::io::Result<Vec<u8>> {
     loop {
         let tk = read_token(iter)?;
         if tk != b" " { return Ok(tk); }
@@ -73,7 +98,7 @@ fn to_number(tok: &[u8]) -> Result<Number, ()> {
     }
 }
 
-fn read_obj<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> std::io::Result<Object> {
+fn read_obj(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
     match &read_token_nonempty(iter)?[..] {
         b"true" => Ok(Object::Bool(true)),
         b"false" => Ok(Object::Bool(false)),
@@ -84,13 +109,13 @@ fn read_obj<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> 
     }
 }
 
-fn read_lit_string<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<T>) -> std::io::Result<Object> {
+fn read_lit_string(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
     let mut ret = Vec::new();
     let mut parens = 0;
     loop {
-        match iter.next().ok_or(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?? {
+        match iter.next_or_eof()? {
             b'\\' => {
-                let c = match iter.next().ok_or(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?? {
+                let c = match iter.next_or_eof()? {
                     b'n' => b'\x0a',
                     b'r' => b'\x0d',
                     b't' => b'\x09',
@@ -99,12 +124,8 @@ fn read_lit_string<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<
                     c @ (b'(' | b')' | b'\\') => c,
                     d1 @ (b'0' ..= b'7') => {
                         let d1 = d1 - b'0';
-                        let d2 = iter.next_if(|r| r.as_ref().is_ok_and(|c| *c >= b'0' && *c <= b'7'))
-                            .transpose()?
-                            .map(|c| c - b'0');
-                        let d3 = iter.next_if(|r| r.as_ref().is_ok_and(|c| *c >= b'0' && *c <= b'7'))
-                            .transpose()?
-                            .map(|c| c - b'0');
+                        let d2 = iter.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
+                        let d3 = iter.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
                         match (d2, d3) {
                             (Some(d2), Some(d3)) => (d1 << 6) + (d2 << 3) + d3,
                             (Some(d2), None) => (d1 << 3) + d2,
@@ -117,7 +138,7 @@ fn read_lit_string<T: Iterator<Item = std::io::Result<u8>>>(iter: &mut Peekable<
                 ret.push(c);
             },
             b'\r' => {
-                iter.next_if(|r| r.as_ref().is_ok_and(|c| *c == b'\n'));
+                iter.next_if(|c| c == b'\n');
                 ret.push(b'\n');
             },
             c => {
@@ -164,7 +185,7 @@ mod tests {
     fn test_tokenizer() {
         let input = "abc  <<g,%k\r\nn";
         let cur = Cursor::new(input);
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_token(&mut bytes).unwrap(), b"abc");
         assert_eq!(read_token(&mut bytes).unwrap(), b" ");
         assert_eq!(read_token(&mut bytes).unwrap(), b"<<");
@@ -176,7 +197,7 @@ mod tests {
 
         let input = "A%1\rB%2\nC";
         let cur = Cursor::new(input);
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_token(&mut bytes).unwrap(), b"A");
         assert_eq!(read_token(&mut bytes).unwrap(), b" ");
         assert_eq!(read_token(&mut bytes).unwrap(), b" ");
@@ -187,7 +208,7 @@ mod tests {
 
         let input = "A%1\r %2\nB";
         let cur = Cursor::new(input);
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_token_nonempty(&mut bytes).unwrap(), b"A");
         assert_eq!(read_token_nonempty(&mut bytes).unwrap(), b"B");
     }
@@ -196,7 +217,7 @@ mod tests {
     fn test_read_obj() {
         let input = "true false 123 +17 -98 0 34.5 -3.62 +123.6 4. -.002 0.0";
         let cur = Cursor::new(input);
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(true));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(false));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Int(123)));
@@ -211,7 +232,7 @@ mod tests {
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Real(0.)));
 
         let cur = Cursor::new("++1 1..0 .1. 1_ 1a 16#FFFE . 6.023E23 true");
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert!(read_obj(&mut bytes).is_err());
         assert!(read_obj(&mut bytes).is_err());
         assert!(read_obj(&mut bytes).is_err());
@@ -227,7 +248,7 @@ mod tests {
     fn test_read_lit_string() {
         let cur = Cursor::new("(string) (new
 line) (parens() (*!&}^%etc).) () ((0)) (()");
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("string"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("new\nline"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("parens() (*!&}^%etc)."));
@@ -238,12 +259,12 @@ line) (parens() (*!&}^%etc).) () ((0)) (()");
         let cur = Cursor::new("(These \\
 two strings \\
 are the same.) (These two strings are the same.)");
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_obj(&mut bytes).unwrap(), read_obj(&mut bytes).unwrap());
 
         let cur = Cursor::new("(1
 ) (2\\n) (3\\r) (4\\r\\n)");
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("1\n"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("2\n"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("3\r"));
@@ -251,14 +272,14 @@ are the same.) (These two strings are the same.)");
 
         let cur = Cursor::new("(1
 ) (2\n) (3\r) (4\r\n)");
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("1\n"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("2\n"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("3\n"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("4\n"));
 
         let cur = Cursor::new("(\\157cta\\154) (\\500) (\\0053\\053\\53) (\\53x)");
-        let mut bytes = cur.bytes().peekable();
+        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("octal"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("@"));
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("\x053++"));
