@@ -34,3 +34,9 @@ impl From<&str> for Name {
         Name(s.bytes().collect())
     }
 }
+
+impl PartialEq<&str> for Name {
+    fn eq(&self, rhs: &&str) -> bool {
+        self.0 == rhs.as_bytes()
+    }
+}

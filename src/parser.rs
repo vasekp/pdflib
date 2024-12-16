@@ -23,9 +23,9 @@ impl CharClass {
 
 
 trait ByteProvider {
+    fn peek(&mut self) -> Option<u8>;
     fn next_or_eof(&mut self) -> std::io::Result<u8>;
     fn next_if(&mut self, cond: impl FnOnce(u8) -> bool) -> Option<u8>;
-    fn peek(&mut self) -> Option<u8>;
 }
 
 impl<T: BufRead> ByteProvider for T {
@@ -62,7 +62,7 @@ impl<T: BufRead> ByteProvider for T {
 
 struct Tokenizer<T: ByteProvider> { bytes: T }
 
-impl<T: ByteProvider> Tokenizer<T> {
+impl<T: ByteProvider + Read> Tokenizer<T> {
     fn read_token(&mut self) -> std::io::Result<Vec<u8>> {
         let c = self.bytes.next_or_eof()?;
         match CharClass::of(c) {
@@ -245,6 +245,7 @@ impl<T: ByteProvider> Tokenizer<T> {
 
     fn read_dict(&mut self) -> std::io::Result<Object> {
         let mut dict = Vec::new();
+        let mut stream_len = None;
         loop {
             let key = match &self.read_token_nonempty()?[..] {
                 b">>" => break,
@@ -252,9 +253,33 @@ impl<T: ByteProvider> Tokenizer<T> {
                 _ => return Err(std::io::Error::other("Malformed dictionary"))
             };
             let value = self.read_obj()?;
+            if key == "Length" {
+                let Object::Number(Number::Int(len)) = value else {
+                    return Err(std::io::Error::other("Invalid stream length"))
+                };
+                stream_len = Some(len);
+            }
             dict.push((key, value));
         }
-        Ok(Object::Dict(dict))
+        if let Some(len) = stream_len {
+            let len = len as usize;
+            if self.read_token_nonempty()? != b"stream" {
+                return Err(std::io::Error::other("Malformed stream"))
+            }
+            self.bytes.next_if(|c| c == b'\r');
+            if self.bytes.next_or_eof()? != b'\n' {
+                return Err(std::io::Error::other("Malformed stream"))
+            }
+            let mut data = Vec::with_capacity(len);
+            unsafe { data.set_len(len); }
+            self.bytes.read_exact(&mut data)?;
+            if self.read_token_nonempty()? != b"endstream" {
+                return Err(std::io::Error::other("Malformed stream"))
+            }
+            Ok(Object::Stream(dict, data))
+        } else {
+            Ok(Object::Dict(dict))
+        }
     }
 }
 
@@ -463,5 +488,18 @@ are the same.) (These two strings are the same.)");
                 (Name::from("VeryLastItem"), Object::new_string("OK"))
             ]))
         ]));
+
+        let mut tkn = Tokenizer::from("<</Length 10>> stream\nabcdefghij\nendstream");
+        assert_eq!(tkn.read_obj().unwrap(), Object::Stream(
+            vec![(Name::from("Length"), Object::Number(Number::Int(10)))],
+            b"abcdefghij".to_vec()));
+
+        let mut tkn = Tokenizer::from("<</Length 10>> stream\r\nabcdefghij\r\nendstream");
+        assert_eq!(tkn.read_obj().unwrap(), Object::Stream(
+            vec![(Name::from("Length"), Object::Number(Number::Int(10)))],
+            b"abcdefghij".to_vec()));
+
+        let mut tkn = Tokenizer::from("<</Length 10>> stream\rabcdefghij\rendstream");
+        assert!(tkn.read_obj().is_err());
     }
 }
