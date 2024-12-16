@@ -16,7 +16,7 @@ impl Object {
     }
 
     pub fn new_name(s: &str) -> Object {
-        Object::Name(Name(s.bytes().collect()))
+        Object::Name(Name::from(s))
     }
 }
 
@@ -28,3 +28,9 @@ pub enum Number {
 
 #[derive(Debug, PartialEq)]
 pub struct Name(pub Vec<u8>);
+
+impl From<&str> for Name {
+    fn from(s: &str) -> Name {
+        Name(s.bytes().collect())
+    }
+}

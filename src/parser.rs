@@ -113,6 +113,7 @@ impl<T: ByteProvider> Tokenizer<T> {
             b"<" => self.read_hex_string(),
             b"/" => self.read_name(),
             b"[" => self.read_array(),
+            b"<<" => self.read_dict(),
             tk => todo!("{:?}", std::str::from_utf8(tk))
         }
     }
@@ -203,14 +204,18 @@ impl<T: ByteProvider> Tokenizer<T> {
     }
 
     fn read_name(&mut self) -> std::io::Result<Object> {
+        Ok(Object::Name(self.read_name_inner()?))
+    }
+
+    fn read_name_inner(&mut self) -> std::io::Result<Name> {
         match self.bytes.peek() {
-            Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Object::Name(Name(Vec::new()))),
-            None => return Ok(Object::Name(Name(Vec::new()))),
+            Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Name(Vec::new())),
+            None => return Ok(Name(Vec::new())),
             _ => ()
         };
         let tk = self.read_token_nonempty()?;
         if !tk.contains(&b'#') {
-            return Ok(Object::Name(Name(tk)));
+            return Ok(Name(tk));
         }
         let mut parts = tk.split(|c| *c == b'#');
         let mut ret: Vec<u8> = parts.next().unwrap().into(); // nonemptiness checked in contains()
@@ -224,7 +229,7 @@ impl<T: ByteProvider> Tokenizer<T> {
             ret.push(u8::from_str_radix(std::str::from_utf8(&part[0..=1]).unwrap(), 16).unwrap()); // valdity of both checked
             ret.extend_from_slice(&part[2..]);
         }
-        Ok(Object::Name(Name(ret)))
+        Ok(Name(ret))
     }
 
     fn read_array(&mut self) -> std::io::Result<Object> {
@@ -235,6 +240,20 @@ impl<T: ByteProvider> Tokenizer<T> {
             vec.push(self.read_obj_inner(tk)?);
         }
         Ok(Object::Array(vec))
+    }
+
+    fn read_dict(&mut self) -> std::io::Result<Object> {
+        let mut dict = Vec::new();
+        loop {
+            let key = match &self.read_token_nonempty()?[..] {
+                b">>" => break,
+                b"/" => self.read_name_inner()?,
+                _ => return Err(std::io::Error::other("Malformed dictionary"))
+            };
+            let value = self.read_obj()?;
+            dict.push((key, value));
+        }
+        Ok(Object::Dict(dict))
     }
 }
 
@@ -413,5 +432,34 @@ are the same.) (These two strings are the same.)");
         ].into()));
         assert_eq!(tkn.read_obj().unwrap(), Object::Array(Vec::new()));
         assert!(tkn.read_obj().is_err());
+    }
+
+    #[test]
+    fn test_read_dict() {
+        let mut tkn = Tokenizer::from("<</Type /Example
+    /Subtype /DictionaryExample
+    /Version 0.01
+    /IntegerItem 12
+    /StringItem (a string)
+    /Subdictionary <<
+        /Item1 0.4
+        /Item2 true
+        /LastItem (not !)
+        /VeryLastItem (OK)
+        >>
+    >>");
+        assert_eq!(tkn.read_obj().unwrap(), Object::Dict(vec![
+            (Name::from("Type"), Object::new_name("Example")),
+            (Name::from("Subtype"), Object::new_name("DictionaryExample")),
+            (Name::from("Version"), Object::Number(Number::Real(0.01))),
+            (Name::from("IntegerItem"), Object::Number(Number::Int(12))),
+            (Name::from("StringItem"), Object::new_string("a string")),
+            (Name::from("Subdictionary"), Object::Dict(vec![
+                (Name::from("Item1"), Object::Number(Number::Real(0.4))),
+                (Name::from("Item2"), Object::Bool(true)),
+                (Name::from("LastItem"), Object::new_string("not !")),
+                (Name::from("VeryLastItem"), Object::new_string("OK"))
+            ]))
+        ]));
     }
 }
