@@ -116,7 +116,7 @@ fn read_obj_inner(iter: &mut impl ByteIteratorT, token: Vec<u8>) -> std::io::Res
         b"true" => Ok(Object::Bool(true)),
         b"false" => Ok(Object::Bool(false)),
         tk @ [b'0'..=b'9' | b'+' | b'-' | b'.', ..] => Ok(Object::Number(to_number(tk)
-                .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Malformed number"))?)),
+                .map_err(|_| std::io::Error::other("Malformed number"))?)),
         b"(" => read_lit_string(iter),
         b"<" => read_hex_string(iter),
         b"/" => read_name(iter),
@@ -183,7 +183,7 @@ fn read_hex_string(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
                 break;
             },
             d if CharClass::of(d) == CharClass::Space => continue,
-            _ => return Err(std::io::Error::new(std::io::ErrorKind::Other, "Malformed hex string"))
+            _ => return Err(std::io::Error::other("Malformed hex string"))
         };
         match msd {
             None => msd = Some(dig),
@@ -207,10 +207,10 @@ fn read_name(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
     let mut ret: Vec<u8> = parts.next().unwrap().into(); // nonemptiness checked in contains()
     for part in parts {
         if part.len() < 2 || !part[0].is_ascii_hexdigit() || !part[1].is_ascii_hexdigit() {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "Malformed name"));
+            return Err(std::io::Error::other("Malformed name"));
         }
         if &part[0..=1] == b"00" {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "Illegal name (contains #00)"));
+            return Err(std::io::Error::other("Illegal name (contains #00)"));
         }
         ret.push(u8::from_str_radix(std::str::from_utf8(&part[0..=1]).unwrap(), 16).unwrap()); // valdity of both checked
         ret.extend_from_slice(&part[2..]);
