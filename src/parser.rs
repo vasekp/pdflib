@@ -1,6 +1,5 @@
-use std::iter::Peekable;
-use std::io::{Read, Cursor};
-use std::fmt::{Debug, Formatter};
+use std::io::{Read, BufRead, Cursor};
+use std::fmt::{Debug};
 
 use crate::base::*;
 
@@ -29,67 +28,62 @@ trait ByteProvider {
     fn peek(&mut self) -> Option<u8>;
 }
 
-
-struct ByteIterator<T: Iterator<Item = std::io::Result<u8>>>(Peekable<T>);
-
-impl<T: Iterator<Item = std::io::Result<u8>>> From<T> for ByteIterator<T> {
-    fn from(iter: T) -> ByteIterator<T> {
-        ByteIterator(iter.peekable())
+impl<T: BufRead> ByteProvider for T {
+    fn peek(&mut self) -> Option<u8> {
+        match self.fill_buf() {
+            Ok(buf) => Some(buf[0]),
+            _ => None
+        }
     }
-}
 
-impl From<&str> for ByteIterator<std::io::Bytes<Cursor<String>>> {
-    fn from(input: &str) -> Self {
-        ByteIterator(Cursor::new(input.to_owned()).bytes().peekable())
-    }
-}
-
-impl<T: Iterator<Item = std::io::Result<u8>>> ByteProvider for ByteIterator<T> {
     fn next_or_eof(&mut self) -> std::io::Result<u8> {
-        self.0.next().ok_or(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?
+        let buf = self.fill_buf()?;
+        if buf.len() > 0 {
+            let ret = buf[0];
+            self.consume(1);
+            return Ok(ret);
+        } else {
+            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+        }
     }
 
     fn next_if(&mut self, cond: impl FnOnce(u8) -> bool) -> Option<u8> {
-        self.0.next_if(|r| r.as_ref().is_ok_and(|c| cond(*c)))
-            .transpose()
-            .unwrap() // is_ok checked within next_if
-    }
-
-    fn peek(&mut self) -> Option<u8> {
-        match self.0.peek() {
-            Some(Ok(c)) => Some(*c),
-            _ => None
+        let buf = self.fill_buf().ok()?;
+        if buf.len() > 0 && cond(buf[0]) {
+            let ret = buf[0];
+            self.consume(1);
+            return Some(ret);
+        } else {
+            return None;
         }
     }
 }
 
 
-struct Tokenizer<T: ByteProvider> {
-    iter: T
-}
+struct Tokenizer<T: ByteProvider> { bytes: T }
 
 impl<T: ByteProvider> Tokenizer<T> {
     fn read_token(&mut self) -> std::io::Result<Vec<u8>> {
-        let c = self.iter.next_or_eof()?;
+        let c = self.bytes.next_or_eof()?;
         match CharClass::of(c) {
             CharClass::Delim => {
-                if (c == b'<' || c == b'>') && self.iter.next_if(|c2| c2 == c).is_some() {
+                if (c == b'<' || c == b'>') && self.bytes.next_if(|c2| c2 == c).is_some() {
                     Ok([c, c].into())
                 } else if c == b'%' {
-                    while self.iter.next_if(|c| c != b'\n' && c != b'\r').is_some() { }
+                    while self.bytes.next_if(|c| c != b'\n' && c != b'\r').is_some() { }
                     Ok([b' '].into())
                 } else {
                     Ok([c].into())
                 }
             },
             CharClass::Space => {
-                while self.iter.next_if(|c| CharClass::of(c) == CharClass::Space).is_some() { }
+                while self.bytes.next_if(|c| CharClass::of(c) == CharClass::Space).is_some() { }
                 Ok([b' '].into())
             },
             CharClass::Reg => {
                 let mut ret = Vec::new();
                 ret.push(c);
-                while let Some(r) = self.iter.next_if(|c| CharClass::of(c) == CharClass::Reg) {
+                while let Some(r) = self.bytes.next_if(|c| CharClass::of(c) == CharClass::Reg) {
                     ret.push(r);
                 }
                 Ok(ret)
@@ -144,9 +138,9 @@ impl<T: ByteProvider> Tokenizer<T> {
         let mut ret = Vec::new();
         let mut parens = 0;
         loop {
-            match self.iter.next_or_eof()? {
+            match self.bytes.next_or_eof()? {
                 b'\\' => {
-                    let c = match self.iter.next_or_eof()? {
+                    let c = match self.bytes.next_or_eof()? {
                         b'n' => b'\x0a',
                         b'r' => b'\x0d',
                         b't' => b'\x09',
@@ -155,8 +149,8 @@ impl<T: ByteProvider> Tokenizer<T> {
                         c @ (b'(' | b')' | b'\\') => c,
                         d1 @ (b'0' ..= b'7') => {
                             let d1 = d1 - b'0';
-                            let d2 = self.iter.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
-                            let d3 = self.iter.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
+                            let d2 = self.bytes.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
+                            let d3 = self.bytes.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
                             match (d2, d3) {
                                 (Some(d2), Some(d3)) => (d1 << 6) + (d2 << 3) + d3,
                                 (Some(d2), None) => (d1 << 3) + d2,
@@ -169,7 +163,7 @@ impl<T: ByteProvider> Tokenizer<T> {
                     ret.push(c);
                 },
                 b'\r' => {
-                    self.iter.next_if(|c| c == b'\n');
+                    self.bytes.next_if(|c| c == b'\n');
                     ret.push(b'\n');
                 },
                 c => {
@@ -188,7 +182,7 @@ impl<T: ByteProvider> Tokenizer<T> {
         let mut msd = None;
         let mut ret = Vec::new();
         loop {
-            let c = self.iter.next_or_eof()?;
+            let c = self.bytes.next_or_eof()?;
             let dig = match c {
                 b'0'..=b'9' => c - b'0',
                 b'a'..=b'f' => c - b'a' + 10,
@@ -209,7 +203,7 @@ impl<T: ByteProvider> Tokenizer<T> {
     }
 
     fn read_name(&mut self) -> std::io::Result<Object> {
-        match self.iter.peek() {
+        match self.bytes.peek() {
             Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Object::Name(Name(Vec::new()))),
             None => return Ok(Object::Name(Name(Vec::new()))),
             _ => ()
@@ -244,9 +238,9 @@ impl<T: ByteProvider> Tokenizer<T> {
     }
 }
 
-impl<T: Iterator<Item = std::io::Result<u8>>, U: Into<ByteIterator<T>>> From<U> for Tokenizer<ByteIterator<T>> {
-    fn from(iter: U) -> Self {
-        Tokenizer { iter: iter.into() }
+impl<T: Into<String>> From<T> for Tokenizer<Cursor<String>> {
+    fn from(input: T) -> Self {
+        Tokenizer { bytes: Cursor::new(input.into()) }
     }
 }
 
