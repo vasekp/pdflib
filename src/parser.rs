@@ -107,6 +107,7 @@ impl<T: ByteProvider> Tokenizer<T> {
         match &token[..] {
             b"true" => Ok(Object::Bool(true)),
             b"false" => Ok(Object::Bool(false)),
+            b"null" => Ok(Object::Null),
             tk @ [b'0'..=b'9' | b'+' | b'-' | b'.', ..] => Ok(Object::Number(Self::to_number(tk)
                     .map_err(|_| std::io::Error::other("Malformed number"))?)),
             b"(" => self.read_lit_string(),
@@ -319,9 +320,10 @@ mod tests {
 
     #[test]
     fn test_read_obj() {
-        let mut tkn = Tokenizer::from("true false 123 +17 -98 0 34.5 -3.62 +123.6 4. -.002 0.0");
+        let mut tkn = Tokenizer::from("true false null 123 +17 -98 0 34.5 -3.62 +123.6 4. -.002 0.0");
         assert_eq!(tkn.read_obj().unwrap(), Object::Bool(true));
         assert_eq!(tkn.read_obj().unwrap(), Object::Bool(false));
+        assert_eq!(tkn.read_obj().unwrap(), Object::Null);
         assert_eq!(tkn.read_obj().unwrap(), Object::Number(Number::Int(123)));
         assert_eq!(tkn.read_obj().unwrap(), Object::Number(Number::Int(17)));
         assert_eq!(tkn.read_obj().unwrap(), Object::Number(Number::Int(-98)));
