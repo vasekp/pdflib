@@ -14,6 +14,10 @@ impl Object {
     pub fn new_string(s: &str) -> Object {
         Object::String(s.bytes().collect())
     }
+
+    pub fn new_name(s: &str) -> Object {
+        Object::Name(Name(s.bytes().collect()))
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -23,4 +27,4 @@ pub enum Number {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Name(Vec<u8>);
+pub struct Name(pub Vec<u8>);

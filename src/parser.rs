@@ -9,6 +9,7 @@ struct ByteIterator<T: Iterator<Item = std::io::Result<u8>>>(Peekable<T>);
 trait ByteIteratorT {
     fn next_or_eof(&mut self) -> std::io::Result<u8>;
     fn next_if(&mut self, cond: impl FnOnce(u8) -> bool) -> Option<u8>;
+    fn peek(&mut self) -> Option<u8>;
 }
 
 impl<T: Iterator<Item = std::io::Result<u8>>> ByteIterator<T> {
@@ -26,6 +27,13 @@ impl<T: Iterator<Item = std::io::Result<u8>>> ByteIteratorT for ByteIterator<T> 
         self.0.next_if(|r| r.as_ref().is_ok_and(|c| cond(*c)))
             .transpose()
             .unwrap() // is_ok checked within next_if
+    }
+
+    fn peek(&mut self) -> Option<u8> {
+        match self.0.peek() {
+            Some(Ok(c)) => Some(*c),
+            _ => None
+        }
     }
 }
 
@@ -106,6 +114,7 @@ fn read_obj(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
                 .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "Malformed number"))?)),
         b"(" => read_lit_string(iter),
         b"<" => read_hex_string(iter),
+        b"/" => read_name(iter),
         _ => todo!()
     }
 }
@@ -178,6 +187,30 @@ fn read_hex_string(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
     Ok(Object::String(ret))
 }
 
+fn read_name(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
+    match iter.peek() {
+        Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Object::Name(Name(Vec::new()))),
+        None => return Ok(Object::Name(Name(Vec::new()))),
+        _ => ()
+    };
+    let tk = read_token_nonempty(iter)?;
+    if !tk.contains(&b'#') {
+        return Ok(Object::Name(Name(tk)));
+    }
+    let mut parts = tk.split(|c| *c == b'#');
+    let mut ret: Vec<u8> = parts.next().unwrap().into(); // nonemptiness checked in contains()
+    for part in parts {
+        if part.len() < 2 || !part[0].is_ascii_hexdigit() || !part[1].is_ascii_hexdigit() {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "Malformed name"));
+        }
+        if &part[0..=1] == b"00" {
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "Illegal name (contains #00)"));
+        }
+        ret.push(u8::from_str_radix(std::str::from_utf8(&part[0..=1]).unwrap(), 16).unwrap()); // valdity of both checked
+        ret.extend_from_slice(&part[2..]);
+    }
+    Ok(Object::Name(Name(ret)))
+}
 
 #[cfg(test)]
 mod tests {
@@ -324,5 +357,33 @@ are the same.) (These two strings are the same.)");
         let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_string("ab"));
         assert!(read_obj(&mut bytes).is_err());
+    }
+
+    #[test]
+    fn test_read_name() {
+        let cur = Cursor::new("/Name1 /A;Name_With-Various***Characters? /1.2 /$$ /@pattern
+            /.notdef /Lime#20Green /paired#28#29parentheses /The_Key_of_F#23_Minor /A#42");
+        let mut bytes = ByteIterator::from(cur.bytes());
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("Name1"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("A;Name_With-Various***Characters?"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("1.2"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("$$"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("@pattern"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name(".notdef"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("Lime Green"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("paired()parentheses"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("The_Key_of_F#_Minor"));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("AB"));
+
+        let cur = Cursor::new("//%\n1 /ok /invalid#00byte /#0x /#0 true");
+        let mut bytes = ByteIterator::from(cur.bytes());
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name(""));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name(""));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::new_name("ok"));
+        assert!(read_obj(&mut bytes).is_err());
+        assert!(read_obj(&mut bytes).is_err());
+        assert!(read_obj(&mut bytes).is_err());
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(true));
     }
 }
