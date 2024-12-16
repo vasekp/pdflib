@@ -25,11 +25,19 @@ impl CharClass {
 
 struct ByteIterator<T: Iterator<Item = std::io::Result<u8>>>(Peekable<T>);
 
-impl<T: Iterator<Item = std::io::Result<u8>>> ByteIterator<T> {
+impl<T: Iterator<Item = std::io::Result<u8>>> From<T> for ByteIterator<T> {
     fn from(iter: T) -> ByteIterator<T> {
         ByteIterator(iter.peekable())
     }
+}
 
+impl From<&str> for ByteIterator<std::io::Bytes<Cursor<String>>> {
+    fn from(input: &str) -> Self {
+        ByteIterator(Cursor::new(input.to_owned()).bytes().peekable())
+    }
+}
+
+impl<T: Iterator<Item = std::io::Result<u8>>> ByteIterator<T> {
     fn next_or_eof(&mut self) -> std::io::Result<u8> {
         self.0.next().ok_or(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))?
     }
@@ -252,9 +260,7 @@ mod tests {
 
     #[test]
     fn test_tokenizer() {
-        let input = "abc  <<g,%k\r\nn";
-        let cur = Cursor::new(input);
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("abc  <<g,%k\r\nn");
         assert_eq!(bytes.read_token().unwrap(), b"abc");
         assert_eq!(bytes.read_token().unwrap(), b" ");
         assert_eq!(bytes.read_token().unwrap(), b"<<");
@@ -264,9 +270,7 @@ mod tests {
         assert_eq!(bytes.read_token().unwrap(), b"n");
         assert!(bytes.read_token().is_err());
 
-        let input = "A%1\rB%2\nC";
-        let cur = Cursor::new(input);
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("A%1\rB%2\nC");
         assert_eq!(bytes.read_token().unwrap(), b"A");
         assert_eq!(bytes.read_token().unwrap(), b" ");
         assert_eq!(bytes.read_token().unwrap(), b" ");
@@ -275,18 +279,14 @@ mod tests {
         assert_eq!(bytes.read_token().unwrap(), b" ");
         assert_eq!(bytes.read_token().unwrap(), b"C");
 
-        let input = "A%1\r %2\nB";
-        let cur = Cursor::new(input);
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("A%1\r %2\nB");
         assert_eq!(bytes.read_token_nonempty().unwrap(), b"A");
         assert_eq!(bytes.read_token_nonempty().unwrap(), b"B");
     }
 
     #[test]
     fn test_read_obj() {
-        let input = "true false 123 +17 -98 0 34.5 -3.62 +123.6 4. -.002 0.0";
-        let cur = Cursor::new(input);
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("true false 123 +17 -98 0 34.5 -3.62 +123.6 4. -.002 0.0");
         assert_eq!(bytes.read_obj().unwrap(), Object::Bool(true));
         assert_eq!(bytes.read_obj().unwrap(), Object::Bool(false));
         assert_eq!(bytes.read_obj().unwrap(), Object::Number(Number::Int(123)));
@@ -300,8 +300,7 @@ mod tests {
         assert_eq!(bytes.read_obj().unwrap(), Object::Number(Number::Real(-0.002)));
         assert_eq!(bytes.read_obj().unwrap(), Object::Number(Number::Real(0.)));
 
-        let cur = Cursor::new("++1 1..0 .1. 1_ 1a 16#FFFE . 6.023E23 true");
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("++1 1..0 .1. 1_ 1a 16#FFFE . 6.023E23 true");
         assert!(bytes.read_obj().is_err());
         assert!(bytes.read_obj().is_err());
         assert!(bytes.read_obj().is_err());
@@ -315,9 +314,8 @@ mod tests {
 
     #[test]
     fn test_read_lit_string() {
-        let cur = Cursor::new("(string) (new
+        let mut bytes = ByteIterator::from("(string) (new
 line) (parens() (*!&}^%etc).) () ((0)) (()");
-        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("string"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("new\nline"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("parens() (*!&}^%etc)."));
@@ -325,30 +323,26 @@ line) (parens() (*!&}^%etc).) () ((0)) (()");
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("(0)"));
         assert!(bytes.read_obj().is_err());
 
-        let cur = Cursor::new("(These \\
+        let mut bytes = ByteIterator::from("(These \\
 two strings \\
 are the same.) (These two strings are the same.)");
-        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(bytes.read_obj().unwrap(), bytes.read_obj().unwrap());
 
-        let cur = Cursor::new("(1
+        let mut bytes = ByteIterator::from("(1
 ) (2\\n) (3\\r) (4\\r\\n)");
-        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("1\n"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("2\n"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("3\r"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("4\r\n"));
 
-        let cur = Cursor::new("(1
+        let mut bytes = ByteIterator::from("(1
 ) (2\n) (3\r) (4\r\n)");
-        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("1\n"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("2\n"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("3\n"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("4\n"));
 
-        let cur = Cursor::new("(\\157cta\\154) (\\500) (\\0053\\053\\53) (\\53x)");
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("(\\157cta\\154) (\\500) (\\0053\\053\\53) (\\53x)");
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("octal"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("@"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("\x053++"));
@@ -357,23 +351,20 @@ are the same.) (These two strings are the same.)");
 
     #[test]
     fn test_read_hex_string() {
-        let cur = Cursor::new("<4E6F762073686D6F7A206B6120706F702E> <901FA3> <901fa>");
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("<4E6F762073686D6F7A206B6120706F702E> <901FA3> <901fa>");
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("Nov shmoz ka pop."));
         assert_eq!(bytes.read_obj().unwrap(), Object::String([0x90, 0x1F, 0xA3].into()));
         assert_eq!(bytes.read_obj().unwrap(), Object::String([0x90, 0x1F, 0xA0].into()));
 
-        let cur = Cursor::new("<61\r\n62> <61%comment\n>");
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("<61\r\n62> <61%comment\n>");
         assert_eq!(bytes.read_obj().unwrap(), Object::new_string("ab"));
         assert!(bytes.read_obj().is_err());
     }
 
     #[test]
     fn test_read_name() {
-        let cur = Cursor::new("/Name1 /A;Name_With-Various***Characters? /1.2 /$$ /@pattern
+        let mut bytes = ByteIterator::from("/Name1 /A;Name_With-Various***Characters? /1.2 /$$ /@pattern
             /.notdef /Lime#20Green /paired#28#29parentheses /The_Key_of_F#23_Minor /A#42");
-        let mut bytes = ByteIterator::from(cur.bytes());
         assert_eq!(bytes.read_obj().unwrap(), Object::new_name("Name1"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_name("A;Name_With-Various***Characters?"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_name("1.2"));
@@ -385,8 +376,7 @@ are the same.) (These two strings are the same.)");
         assert_eq!(bytes.read_obj().unwrap(), Object::new_name("The_Key_of_F#_Minor"));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_name("AB"));
 
-        let cur = Cursor::new("//%\n1 /ok /invalid#00byte /#0x /#0 true");
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("//%\n1 /ok /invalid#00byte /#0x /#0 true");
         assert_eq!(bytes.read_obj().unwrap(), Object::new_name(""));
         assert_eq!(bytes.read_obj().unwrap(), Object::new_name(""));
         assert_eq!(bytes.read_obj().unwrap(), Object::Number(Number::Int(1)));
@@ -399,8 +389,7 @@ are the same.) (These two strings are the same.)");
 
     #[test]
     fn test_read_array() {
-        let cur = Cursor::new("[549 3.14 false (Ralph) /SomeName] [ %\n ] [false%]");
-        let mut bytes = ByteIterator::from(cur.bytes());
+        let mut bytes = ByteIterator::from("[549 3.14 false (Ralph) /SomeName] [ %\n ] [false%]");
         assert_eq!(bytes.read_obj().unwrap(), Object::Array([
                 Object::Number(Number::Int(549)),
                 Object::Number(Number::Real(3.14)),
