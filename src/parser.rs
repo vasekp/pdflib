@@ -107,7 +107,12 @@ fn to_number(tok: &[u8]) -> Result<Number, ()> {
 }
 
 fn read_obj(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
-    match &read_token_nonempty(iter)?[..] {
+    let first = read_token_nonempty(iter)?;
+    read_obj_inner(iter, first)
+}
+
+fn read_obj_inner(iter: &mut impl ByteIteratorT, token: Vec<u8>) -> std::io::Result<Object> {
+    match &token[..] {
         b"true" => Ok(Object::Bool(true)),
         b"false" => Ok(Object::Bool(false)),
         tk @ [b'0'..=b'9' | b'+' | b'-' | b'.', ..] => Ok(Object::Number(to_number(tk)
@@ -115,7 +120,8 @@ fn read_obj(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
         b"(" => read_lit_string(iter),
         b"<" => read_hex_string(iter),
         b"/" => read_name(iter),
-        _ => todo!()
+        b"[" => read_array(iter),
+        tk => todo!("{:?}", std::str::from_utf8(tk))
     }
 }
 
@@ -210,6 +216,16 @@ fn read_name(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
         ret.extend_from_slice(&part[2..]);
     }
     Ok(Object::Name(Name(ret)))
+}
+
+fn read_array(iter: &mut impl ByteIteratorT) -> std::io::Result<Object> {
+    let mut vec = Vec::new();
+    loop {
+        let tk = read_token_nonempty(iter)?;
+        if tk == b"]" { break; }
+        vec.push(read_obj_inner(iter, tk)?);
+    }
+    Ok(Object::Array(vec))
 }
 
 #[cfg(test)]
@@ -385,5 +401,20 @@ are the same.) (These two strings are the same.)");
         assert!(read_obj(&mut bytes).is_err());
         assert!(read_obj(&mut bytes).is_err());
         assert_eq!(read_obj(&mut bytes).unwrap(), Object::Bool(true));
+    }
+
+    #[test]
+    fn test_read_array() {
+        let cur = Cursor::new("[549 3.14 false (Ralph) /SomeName] [ %\n ] [false%]");
+        let mut bytes = ByteIterator::from(cur.bytes());
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Array([
+                Object::Number(Number::Int(549)),
+                Object::Number(Number::Real(3.14)),
+                Object::Bool(false),
+                Object::new_string("Ralph"),
+                Object::new_name("SomeName")
+        ].into()));
+        assert_eq!(read_obj(&mut bytes).unwrap(), Object::Array(Vec::new()));
+        assert!(read_obj(&mut bytes).is_err());
     }
 }
