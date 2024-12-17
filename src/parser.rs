@@ -282,14 +282,22 @@ impl<T: ByteProvider> ObjParser<T> {
         }
         let mut parts = tk.split(|c| *c == b'#');
         let mut ret: Vec<u8> = parts.next().unwrap().into(); // nonemptiness checked in contains()
+        let hex = |c| match c {
+            b'0'..=b'9' => Ok(c - b'0'),
+            b'a'..=b'f' => Ok(c - b'a' + 10),
+            b'A'..=b'F' => Ok(c - b'A' + 10),
+            _ => Err(std::io::Error::other("Malformed name"))
+        };
         for part in parts {
-            if part.len() < 2 || !part[0].is_ascii_hexdigit() || !part[1].is_ascii_hexdigit() {
+            if part.len() < 2 {
                 return Err(std::io::Error::other("Malformed name"));
             }
             if &part[0..=1] == b"00" {
                 return Err(std::io::Error::other("Illegal name (contains #00)"));
             }
-            ret.push(u8::from_str_radix(std::str::from_utf8(&part[0..=1]).unwrap(), 16).unwrap()); // valdity of both checked
+            let d1 = hex(part[0])?;
+            let d2 = hex(part[1])?;
+            ret.push((d1 << 4) + d2);
             ret.extend_from_slice(&part[2..]);
         }
         Ok(Name(ret))
