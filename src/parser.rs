@@ -60,10 +60,12 @@ impl<T: BufRead> ByteProvider for T {
 }
 
 
+type Token = Vec<u8>;
+
 struct Tokenizer<T: ByteProvider> { bytes: T }
 
 impl<T: ByteProvider> Tokenizer<T> {
-    fn read_token(&mut self) -> std::io::Result<Vec<u8>> {
+    fn read_token(&mut self) -> std::io::Result<Token> {
         let c = self.bytes.next_or_eof()?;
         match CharClass::of(c) {
             CharClass::Delim => {
@@ -91,20 +93,58 @@ impl<T: ByteProvider> Tokenizer<T> {
         }
     }
 
-    fn read_token_nonempty(&mut self) -> std::io::Result<Vec<u8>> {
+    fn read_token_nonempty(&mut self) -> std::io::Result<Token> {
         loop {
             let tk = self.read_token()?;
             if tk != b" " { return Ok(tk); }
         }
     }
+}
 
-    fn read_obj(&mut self) -> std::io::Result<Object> {
-        let first = self.read_token_nonempty()?;
-        self.read_obj_inner(first)
+impl<T: Into<String>> From<T> for Tokenizer<Cursor<String>> {
+    fn from(input: T) -> Self {
+        Tokenizer { bytes: Cursor::new(input.into()) }
+    }
+}
+
+
+struct TokenStack<T: ByteProvider> {
+    tkn: Tokenizer<T>,
+    stack: Vec<Token>
+}
+
+impl<T: ByteProvider> TokenStack<T> {
+    fn new(tkn: Tokenizer<T>) -> Self {
+        Self { tkn, stack: Vec::with_capacity(3) }
     }
 
-    fn read_obj_inner(&mut self, token: Vec<u8>) -> std::io::Result<Object> {
-        match &token[..] {
+    fn next(&mut self) -> std::io::Result<Token> {
+        match self.stack.pop() {
+            Some(tk) => Ok(tk),
+            None => self.tkn.read_token_nonempty()
+        }
+    }
+
+    fn unread(&mut self, tk: Token) {
+        self.stack.push(tk);
+    }
+
+    fn bytes(&mut self) -> &mut T {
+        assert!(self.stack.is_empty());
+        &mut self.tkn.bytes
+    }
+}
+
+
+struct ObjParser<T: ByteProvider> {
+    tokens: TokenStack<T>
+}
+
+
+impl<T: ByteProvider> ObjParser<T> {
+    fn read_obj(&mut self) -> std::io::Result<Object> {
+        let first = self.tokens.next()?;
+        match &first[..] {
             b"true" => Ok(Object::Bool(true)),
             b"false" => Ok(Object::Bool(false)),
             b"null" => Ok(Object::Null),
@@ -139,10 +179,11 @@ impl<T: ByteProvider> Tokenizer<T> {
     fn read_lit_string(&mut self) -> std::io::Result<Object> {
         let mut ret = Vec::new();
         let mut parens = 0;
+        let mut bytes = self.tokens.bytes();
         loop {
-            match self.bytes.next_or_eof()? {
+            match bytes.next_or_eof()? {
                 b'\\' => {
-                    let c = match self.bytes.next_or_eof()? {
+                    let c = match bytes.next_or_eof()? {
                         b'n' => b'\x0a',
                         b'r' => b'\x0d',
                         b't' => b'\x09',
@@ -151,8 +192,8 @@ impl<T: ByteProvider> Tokenizer<T> {
                         c @ (b'(' | b')' | b'\\') => c,
                         d1 @ (b'0' ..= b'7') => {
                             let d1 = d1 - b'0';
-                            let d2 = self.bytes.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
-                            let d3 = self.bytes.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
+                            let d2 = bytes.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
+                            let d3 = bytes.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
                             match (d2, d3) {
                                 (Some(d2), Some(d3)) => (d1 << 6) + (d2 << 3) + d3,
                                 (Some(d2), None) => (d1 << 3) + d2,
@@ -165,7 +206,7 @@ impl<T: ByteProvider> Tokenizer<T> {
                     ret.push(c);
                 },
                 b'\r' => {
-                    self.bytes.next_if(|c| c == b'\n');
+                    bytes.next_if(|c| c == b'\n');
                     ret.push(b'\n');
                 },
                 c => {
@@ -183,8 +224,9 @@ impl<T: ByteProvider> Tokenizer<T> {
     fn read_hex_string(&mut self) -> std::io::Result<Object> {
         let mut msd = None;
         let mut ret = Vec::new();
+        let mut bytes = self.tokens.bytes();
         loop {
-            let c = self.bytes.next_or_eof()?;
+            let c = bytes.next_or_eof()?;
             let dig = match c {
                 b'0'..=b'9' => c - b'0',
                 b'a'..=b'f' => c - b'a' + 10,
@@ -209,12 +251,12 @@ impl<T: ByteProvider> Tokenizer<T> {
     }
 
     fn read_name_inner(&mut self) -> std::io::Result<Name> {
-        match self.bytes.peek() {
+        match self.tokens.bytes().peek() {
             Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Name(Vec::new())),
             None => return Ok(Name(Vec::new())),
             _ => ()
         };
-        let tk = self.read_token_nonempty()?;
+        let tk = self.tokens.next()?;
         if !tk.contains(&b'#') {
             return Ok(Name(tk));
         }
@@ -236,9 +278,10 @@ impl<T: ByteProvider> Tokenizer<T> {
     fn read_array(&mut self) -> std::io::Result<Object> {
         let mut vec = Vec::new();
         loop {
-            let tk = self.read_token_nonempty()?;
+            let tk = self.tokens.next()?;
             if tk == b"]" { break; }
-            vec.push(self.read_obj_inner(tk)?);
+            self.tokens.unread(tk);
+            vec.push(self.read_obj()?);
         }
         Ok(Object::Array(vec))
     }
@@ -246,7 +289,7 @@ impl<T: ByteProvider> Tokenizer<T> {
     fn read_dict(&mut self) -> std::io::Result<Object> {
         let mut dict = Vec::new();
         loop {
-            let key = match &self.read_token_nonempty()?[..] {
+            let key = match &self.tokens.next()?[..] {
                 b">>" => break,
                 b"/" => self.read_name_inner()?,
                 _ => return Err(std::io::Error::other("Malformed dictionary"))
@@ -258,9 +301,9 @@ impl<T: ByteProvider> Tokenizer<T> {
     }
 }
 
-impl<T: Into<String>> From<T> for Tokenizer<Cursor<String>> {
+impl<T: Into<String>> From<T> for ObjParser<Cursor<String>> {
     fn from(input: T) -> Self {
-        Tokenizer { bytes: Cursor::new(input.into()) }
+        ObjParser { tokens: TokenStack::new(Tokenizer::from(input)) }
     }
 }
 
@@ -320,7 +363,7 @@ mod tests {
 
     #[test]
     fn test_read_obj() {
-        let mut tkn = Tokenizer::from("true false null 123 +17 -98 0 34.5 -3.62 +123.6 4. -.002 0.0");
+        let mut tkn = ObjParser::from("true false null 123 +17 -98 0 34.5 -3.62 +123.6 4. -.002 0.0");
         assert_eq!(tkn.read_obj().unwrap(), Object::Bool(true));
         assert_eq!(tkn.read_obj().unwrap(), Object::Bool(false));
         assert_eq!(tkn.read_obj().unwrap(), Object::Null);
@@ -335,7 +378,7 @@ mod tests {
         assert_eq!(tkn.read_obj().unwrap(), Object::Number(Number::Real(-0.002)));
         assert_eq!(tkn.read_obj().unwrap(), Object::Number(Number::Real(0.)));
 
-        let mut tkn = Tokenizer::from("++1 1..0 .1. 1_ 1a 16#FFFE . 6.023E23 true");
+        let mut tkn = ObjParser::from("++1 1..0 .1. 1_ 1a 16#FFFE . 6.023E23 true");
         assert!(tkn.read_obj().is_err());
         assert!(tkn.read_obj().is_err());
         assert!(tkn.read_obj().is_err());
@@ -349,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_read_lit_string() {
-        let mut tkn = Tokenizer::from("(string) (new
+        let mut tkn = ObjParser::from("(string) (new
 line) (parens() (*!&}^%etc).) () ((0)) (()");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("string"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("new\nline"));
@@ -358,26 +401,26 @@ line) (parens() (*!&}^%etc).) () ((0)) (()");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("(0)"));
         assert!(tkn.read_obj().is_err());
 
-        let mut tkn = Tokenizer::from("(These \\
+        let mut tkn = ObjParser::from("(These \\
 two strings \\
 are the same.) (These two strings are the same.)");
         assert_eq!(tkn.read_obj().unwrap(), tkn.read_obj().unwrap());
 
-        let mut tkn = Tokenizer::from("(1
+        let mut tkn = ObjParser::from("(1
 ) (2\\n) (3\\r) (4\\r\\n)");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("1\n"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("2\n"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("3\r"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("4\r\n"));
 
-        let mut tkn = Tokenizer::from("(1
+        let mut tkn = ObjParser::from("(1
 ) (2\n) (3\r) (4\r\n)");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("1\n"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("2\n"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("3\n"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("4\n"));
 
-        let mut tkn = Tokenizer::from("(\\157cta\\154) (\\500) (\\0053\\053\\53) (\\53x)");
+        let mut tkn = ObjParser::from("(\\157cta\\154) (\\500) (\\0053\\053\\53) (\\53x)");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("octal"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("@"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("\x053++"));
@@ -386,19 +429,19 @@ are the same.) (These two strings are the same.)");
 
     #[test]
     fn test_read_hex_string() {
-        let mut tkn = Tokenizer::from("<4E6F762073686D6F7A206B6120706F702E> <901FA3> <901fa>");
+        let mut tkn = ObjParser::from("<4E6F762073686D6F7A206B6120706F702E> <901FA3> <901fa>");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("Nov shmoz ka pop."));
         assert_eq!(tkn.read_obj().unwrap(), Object::String([0x90, 0x1F, 0xA3].into()));
         assert_eq!(tkn.read_obj().unwrap(), Object::String([0x90, 0x1F, 0xA0].into()));
 
-        let mut tkn = Tokenizer::from("<61\r\n62> <61%comment\n>");
+        let mut tkn = ObjParser::from("<61\r\n62> <61%comment\n>");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("ab"));
         assert!(tkn.read_obj().is_err());
     }
 
     #[test]
     fn test_read_name() {
-        let mut tkn = Tokenizer::from("/Name1 /A;Name_With-Various***Characters? /1.2 /$$ /@pattern
+        let mut tkn = ObjParser::from("/Name1 /A;Name_With-Various***Characters? /1.2 /$$ /@pattern
             /.notdef /Lime#20Green /paired#28#29parentheses /The_Key_of_F#23_Minor /A#42");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_name("Name1"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_name("A;Name_With-Various***Characters?"));
@@ -411,7 +454,7 @@ are the same.) (These two strings are the same.)");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_name("The_Key_of_F#_Minor"));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_name("AB"));
 
-        let mut tkn = Tokenizer::from("//%\n1 /ok /invalid#00byte /#0x /#0 true");
+        let mut tkn = ObjParser::from("//%\n1 /ok /invalid#00byte /#0x /#0 true");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_name(""));
         assert_eq!(tkn.read_obj().unwrap(), Object::new_name(""));
         assert_eq!(tkn.read_obj().unwrap(), Object::Number(Number::Int(1)));
@@ -424,7 +467,7 @@ are the same.) (These two strings are the same.)");
 
     #[test]
     fn test_read_array() {
-        let mut tkn = Tokenizer::from("[549 3.14 false (Ralph) /SomeName] [ %\n ] [false%]");
+        let mut tkn = ObjParser::from("[549 3.14 false (Ralph) /SomeName] [ %\n ] [false%]");
         assert_eq!(tkn.read_obj().unwrap(), Object::Array([
                 Object::Number(Number::Int(549)),
                 Object::Number(Number::Real(3.14)),
@@ -438,7 +481,7 @@ are the same.) (These two strings are the same.)");
 
     #[test]
     fn test_read_dict() {
-        let mut tkn = Tokenizer::from("<</Type /Example
+        let mut tkn = ObjParser::from("<</Type /Example
     /Subtype /DictionaryExample
     /Version 0.01
     /IntegerItem 12
@@ -463,5 +506,10 @@ are the same.) (These two strings are the same.)");
                 (Name::from("VeryLastItem"), Object::new_string("OK"))
             ]))
         ]));
+
+        /*let mut tkn = ObjParser::from("<</Length 8 0 R>>");
+        assert_eq!(tkn.read_obj().unwrap(), Object::Dict(vec![
+            (Name::from("Length"), Object::Number(Number::Int(8)))
+        ]));*/
     }
 }
