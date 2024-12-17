@@ -62,7 +62,11 @@ impl<T: BufRead> ByteProvider for T {
 
 type Token = Vec<u8>;
 
-struct Tokenizer<T: ByteProvider> { bytes: T }
+struct Tokenizer<T: ByteProvider> {
+    bytes: T,
+    stack: Vec<Token>
+}
+
 
 impl<T: ByteProvider> Tokenizer<T> {
     fn read_token(&mut self) -> std::io::Result<Token> {
@@ -99,29 +103,15 @@ impl<T: ByteProvider> Tokenizer<T> {
             if tk != b" " { return Ok(tk); }
         }
     }
-}
 
-impl<T: Into<String>> From<T> for Tokenizer<Cursor<String>> {
-    fn from(input: T) -> Self {
-        Tokenizer { bytes: Cursor::new(input.into()) }
-    }
-}
-
-
-struct TokenStack<T: ByteProvider> {
-    tkn: Tokenizer<T>,
-    stack: Vec<Token>
-}
-
-impl<T: ByteProvider> TokenStack<T> {
-    fn new(tkn: Tokenizer<T>) -> Self {
-        Self { tkn, stack: Vec::with_capacity(3) }
+    fn new(bytes: T) -> Self {
+        Self { bytes, stack: Vec::with_capacity(3) }
     }
 
     fn next(&mut self) -> std::io::Result<Token> {
         match self.stack.pop() {
             Some(tk) => Ok(tk),
-            None => self.tkn.read_token_nonempty()
+            None => self.read_token_nonempty()
         }
     }
 
@@ -131,19 +121,25 @@ impl<T: ByteProvider> TokenStack<T> {
 
     fn bytes(&mut self) -> &mut T {
         assert!(self.stack.is_empty());
-        &mut self.tkn.bytes
+        &mut self.bytes
+    }
+}
+
+impl<T: Into<String>> From<T> for Tokenizer<Cursor<String>> {
+    fn from(input: T) -> Self {
+        Tokenizer::new(Cursor::new(input.into()))
     }
 }
 
 
 struct ObjParser<T: ByteProvider> {
-    tokens: TokenStack<T>
+    tkn: Tokenizer<T>
 }
 
 
 impl<T: ByteProvider> ObjParser<T> {
     fn read_obj(&mut self) -> std::io::Result<Object> {
-        let first = self.tokens.next()?;
+        let first = self.tkn.next()?;
         match &first[..] {
             b"true" => Ok(Object::Bool(true)),
             b"false" => Ok(Object::Bool(false)),
@@ -179,7 +175,7 @@ impl<T: ByteProvider> ObjParser<T> {
     fn read_lit_string(&mut self) -> std::io::Result<Object> {
         let mut ret = Vec::new();
         let mut parens = 0;
-        let mut bytes = self.tokens.bytes();
+        let mut bytes = self.tkn.bytes();
         loop {
             match bytes.next_or_eof()? {
                 b'\\' => {
@@ -224,7 +220,7 @@ impl<T: ByteProvider> ObjParser<T> {
     fn read_hex_string(&mut self) -> std::io::Result<Object> {
         let mut msd = None;
         let mut ret = Vec::new();
-        let mut bytes = self.tokens.bytes();
+        let mut bytes = self.tkn.bytes();
         loop {
             let c = bytes.next_or_eof()?;
             let dig = match c {
@@ -251,12 +247,12 @@ impl<T: ByteProvider> ObjParser<T> {
     }
 
     fn read_name_inner(&mut self) -> std::io::Result<Name> {
-        match self.tokens.bytes().peek() {
+        match self.tkn.bytes().peek() {
             Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Name(Vec::new())),
             None => return Ok(Name(Vec::new())),
             _ => ()
         };
-        let tk = self.tokens.next()?;
+        let tk = self.tkn.next()?;
         if !tk.contains(&b'#') {
             return Ok(Name(tk));
         }
@@ -278,9 +274,9 @@ impl<T: ByteProvider> ObjParser<T> {
     fn read_array(&mut self) -> std::io::Result<Object> {
         let mut vec = Vec::new();
         loop {
-            let tk = self.tokens.next()?;
+            let tk = self.tkn.next()?;
             if tk == b"]" { break; }
-            self.tokens.unread(tk);
+            self.tkn.unread(tk);
             vec.push(self.read_obj()?);
         }
         Ok(Object::Array(vec))
@@ -289,7 +285,7 @@ impl<T: ByteProvider> ObjParser<T> {
     fn read_dict(&mut self) -> std::io::Result<Object> {
         let mut dict = Vec::new();
         loop {
-            let key = match &self.tokens.next()?[..] {
+            let key = match &self.tkn.next()?[..] {
                 b">>" => break,
                 b"/" => self.read_name_inner()?,
                 _ => return Err(std::io::Error::other("Malformed dictionary"))
@@ -303,7 +299,7 @@ impl<T: ByteProvider> ObjParser<T> {
 
 impl<T: Into<String>> From<T> for ObjParser<Cursor<String>> {
     fn from(input: T) -> Self {
-        ObjParser { tokens: TokenStack::new(Tokenizer::from(input)) }
+        ObjParser { tkn: Tokenizer::from(input) }
     }
 }
 
