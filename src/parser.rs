@@ -1,4 +1,4 @@
-use std::io::{Read, BufRead, Cursor};
+use std::io::{BufRead, Cursor};
 use std::fmt::Debug;
 use std::error::Error;
 
@@ -39,23 +39,23 @@ impl<T: BufRead> ByteProvider for T {
 
     fn next_or_eof(&mut self) -> std::io::Result<u8> {
         let buf = self.fill_buf()?;
-        if buf.len() > 0 {
+        if !buf.is_empty() {
             let ret = buf[0];
             self.consume(1);
-            return Ok(ret);
+            Ok(ret)
         } else {
-            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+            Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
         }
     }
 
     fn next_if(&mut self, cond: impl FnOnce(u8) -> bool) -> Option<u8> {
         let buf = self.fill_buf().ok()?;
-        if buf.len() > 0 && cond(buf[0]) {
+        if !buf.is_empty() && cond(buf[0]) {
             let ret = buf[0];
             self.consume(1);
-            return Some(ret);
+            Some(ret)
         } else {
-            return None;
+            None
         }
     }
 }
@@ -203,7 +203,7 @@ impl<T: ByteProvider> ObjParser<T> {
     fn read_lit_string(&mut self) -> std::io::Result<Object> {
         let mut ret = Vec::new();
         let mut parens = 0;
-        let mut bytes = self.tkn.bytes();
+        let bytes = self.tkn.bytes();
         loop {
             match bytes.next_or_eof()? {
                 b'\\' => {
@@ -216,8 +216,8 @@ impl<T: ByteProvider> ObjParser<T> {
                         c @ (b'(' | b')' | b'\\') => c,
                         d1 @ (b'0' ..= b'7') => {
                             let d1 = d1 - b'0';
-                            let d2 = bytes.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
-                            let d3 = bytes.next_if(|c| c >= b'0' && c <= b'7').map(|c| c - b'0');
+                            let d2 = bytes.next_if(|c| (b'0'..=b'7').contains(&c)).map(|c| c - b'0');
+                            let d3 = bytes.next_if(|c| (b'0'..=b'7').contains(&c)).map(|c| c - b'0');
                             match (d2, d3) {
                                 (Some(d2), Some(d3)) => (d1 << 6) + (d2 << 3) + d3,
                                 (Some(d2), None) => (d1 << 3) + d2,
@@ -234,9 +234,9 @@ impl<T: ByteProvider> ObjParser<T> {
                     ret.push(b'\n');
                 },
                 c => {
-                    if c == b'(' { parens = parens + 1; }
+                    if c == b'(' { parens += 1; }
                     if c == b')' {
-                        if parens == 0 { break; } else { parens = parens - 1; }
+                        if parens == 0 { break; } else { parens -= 1; }
                     }
                     ret.push(c);
                 }
@@ -248,7 +248,7 @@ impl<T: ByteProvider> ObjParser<T> {
     fn read_hex_string(&mut self) -> std::io::Result<Object> {
         let mut msd = None;
         let mut ret = Vec::new();
-        let mut bytes = self.tkn.bytes();
+        let bytes = self.tkn.bytes();
         loop {
             let c = bytes.next_or_eof()?;
             let dig = match c {
