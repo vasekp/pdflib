@@ -75,17 +75,17 @@ impl<T: ByteProvider> Tokenizer<T> {
         match CharClass::of(c) {
             CharClass::Delim => {
                 if (c == b'<' || c == b'>') && self.bytes.next_if(|c2| c2 == c).is_some() {
-                    Ok([c, c].into())
+                    Ok(vec![c, c])
                 } else if c == b'%' {
                     while self.bytes.next_if(|c| c != b'\n' && c != b'\r').is_some() { }
-                    Ok([b' '].into())
+                    Ok(vec![b' '])
                 } else {
-                    Ok([c].into())
+                    Ok(vec![c])
                 }
             },
             CharClass::Space => {
                 while self.bytes.next_if(|c| CharClass::of(c) == CharClass::Space).is_some() { }
-                Ok([b' '].into())
+                Ok(vec![b' '])
             },
             CharClass::Reg => {
                 let mut ret = Vec::new();
@@ -451,8 +451,8 @@ are the same.) (These two strings are the same.)");
     fn test_read_hex_string() {
         let mut tkn = ObjParser::from("<4E6F762073686D6F7A206B6120706F702E> <901FA3> <901fa>");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("Nov shmoz ka pop."));
-        assert_eq!(tkn.read_obj().unwrap(), Object::String([0x90, 0x1F, 0xA3].into()));
-        assert_eq!(tkn.read_obj().unwrap(), Object::String([0x90, 0x1F, 0xA0].into()));
+        assert_eq!(tkn.read_obj().unwrap(), Object::String(vec![0x90, 0x1F, 0xA3]));
+        assert_eq!(tkn.read_obj().unwrap(), Object::String(vec![0x90, 0x1F, 0xA0]));
 
         let mut tkn = ObjParser::from("<61\r\n62> <61%comment\n>");
         assert_eq!(tkn.read_obj().unwrap(), Object::new_string("ab"));
@@ -488,13 +488,13 @@ are the same.) (These two strings are the same.)");
     #[test]
     fn test_read_array() {
         let mut tkn = ObjParser::from("[549 3.14 false (Ralph) /SomeName] [ %\n ] [false%]");
-        assert_eq!(tkn.read_obj().unwrap(), Object::Array([
+        assert_eq!(tkn.read_obj().unwrap(), Object::Array(vec![
                 Object::Number(Number::Int(549)),
                 Object::Number(Number::Real(3.14)),
                 Object::Bool(false),
                 Object::new_string("Ralph"),
                 Object::new_name("SomeName")
-        ].into()));
+        ]));
         assert_eq!(tkn.read_obj().unwrap(), Object::Array(Vec::new()));
         assert!(tkn.read_obj().is_err());
     }
