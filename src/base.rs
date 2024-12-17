@@ -6,7 +6,8 @@ pub enum Object {
     Name(Name),
     Array(Vec<Object>),
     Dict(Vec<(Name, Object)>),
-    Stream(Vec<(Name, Object)>, Vec<u8>),
+    //Stream(Vec<(Name, Object)>, Vec<u8>),
+    Indirect(ObjRef),
     Null
 }
 
@@ -34,3 +35,6 @@ impl From<&str> for Name {
         Name(s.bytes().collect())
     }
 }
+
+#[derive(PartialEq, Debug)]
+pub struct ObjRef(pub u64, pub u32);

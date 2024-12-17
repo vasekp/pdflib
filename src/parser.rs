@@ -1,5 +1,6 @@
 use std::io::{Read, BufRead, Cursor};
-use std::fmt::{Debug};
+use std::fmt::Debug;
+use std::error::Error;
 
 use crate::base::*;
 
@@ -144,31 +145,58 @@ impl<T: ByteProvider> ObjParser<T> {
             b"true" => Ok(Object::Bool(true)),
             b"false" => Ok(Object::Bool(false)),
             b"null" => Ok(Object::Null),
-            tk @ [b'0'..=b'9' | b'+' | b'-' | b'.', ..] => Ok(Object::Number(Self::to_number(tk)
-                    .map_err(|_| std::io::Error::other("Malformed number"))?)),
+            [b'0'..=b'9', ..] => {
+                self.tkn.unread(first);
+                self.read_number_or_indirect() },
+            [b'+' | b'-' | b'.', ..] => {
+                self.tkn.unread(first);
+                self.read_number().map(Object::Number) },
             b"(" => self.read_lit_string(),
             b"<" => self.read_hex_string(),
             b"/" => self.read_name().map(Object::Name),
             b"[" => self.read_array(),
             b"<<" => self.read_dict(),
-            tk => todo!("{:?}", std::str::from_utf8(tk))
+            b"R" => Err(std::io::Error::other("Unexcepted token: R")),
+            _ => todo!("{:?}", std::str::from_utf8(&first))
         }
     }
 
-    fn to_number(tok: &[u8]) -> Result<Number, ()> {
+    fn read_number(&mut self) -> std::io::Result<Number> {
+        Self::to_number_inner(&self.tkn.next()?)
+            .map_err(|_| std::io::Error::other("Malformed number"))
+    }
+
+    fn read_number_or_indirect(&mut self) -> std::io::Result<Object> {
+        let num = Self::to_number_inner(&self.tkn.next()?)
+            .map_err(|_| std::io::Error::other("Malformed number"))?;
+        let Number::Int(num) = num else {
+            return Ok(Object::Number(num))
+        };
+        assert!(num >= 0);
+        let gen_tk = self.tkn.next()?;
+        match Self::to_number_inner(&gen_tk) {
+            Ok(Number::Int(gen)) if gen <= u32::MAX as i64 => {
+                let r_tk = self.tkn.next()?;
+                if r_tk == b"R" {
+                    return Ok(Object::Indirect(ObjRef(num as u64, gen as u32)));
+                } else {
+                    self.tkn.unread(r_tk);
+                    self.tkn.unread(gen_tk);
+                }
+            },
+            _ => self.tkn.unread(gen_tk)
+        }
+        Ok(Object::Number(Number::Int(num)))
+    }
+
+    fn to_number_inner(tok: &Token) -> Result<Number, Box<dyn Error>> {
         if tok.contains(&b'e') || tok.contains(&b'E') {
-            return Err(());
+            return Err("".into());
         }
         if tok.contains(&b'.') {
-            Ok(Number::Real(std::str::from_utf8(tok)
-                .map_err(|_| ())?
-                .parse::<f64>()
-                .map_err(|_| ())?))
+            Ok(Number::Real(std::str::from_utf8(tok)?.parse::<f64>()?))
         } else {
-            Ok(Number::Int(std::str::from_utf8(tok)
-                .map_err(|_| ())?
-                .parse::<i64>()
-                .map_err(|_| ())?))
+            Ok(Number::Int(std::str::from_utf8(tok)?.parse::<i64>()?))
         }
     }
 
@@ -498,10 +526,19 @@ are the same.) (These two strings are the same.)");
                 (Name::from("VeryLastItem"), Object::new_string("OK"))
             ]))
         ]));
+    }
 
-        /*let mut tkn = ObjParser::from("<</Length 8 0 R>>");
+    #[test]
+    fn test_read_indirect() {
+        let mut tkn = ObjParser::from("<</Length 8 0 R>>");
         assert_eq!(tkn.read_obj().unwrap(), Object::Dict(vec![
-            (Name::from("Length"), Object::Number(Number::Int(8)))
-        ]));*/
+            (Name::from("Length"), Object::Indirect(ObjRef(8, 0)))
+        ]));
+
+        let mut tkn = ObjParser::from("1 2 3 R 4 R");
+        assert_eq!(tkn.read_obj().unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(tkn.read_obj().unwrap(), Object::Indirect(ObjRef(2, 3)));
+        assert_eq!(tkn.read_obj().unwrap(), Object::Number(Number::Int(4)));
+        assert!(tkn.read_obj().is_err());
     }
 }
