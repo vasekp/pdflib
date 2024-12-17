@@ -23,7 +23,7 @@ impl CharClass {
 }
 
 
-trait ByteProvider {
+pub trait ByteProvider {
     fn next_or_eof(&mut self) -> std::io::Result<u8>;
     fn next_if(&mut self, cond: impl FnOnce(u8) -> bool) -> Option<u8>;
     fn peek(&mut self) -> Option<u8>;
@@ -133,13 +133,13 @@ impl<T: Into<String>> From<T> for Tokenizer<Cursor<String>> {
 }
 
 
-struct ObjParser<T: ByteProvider> {
+pub struct ObjParser<T: ByteProvider> {
     tkn: Tokenizer<T>
 }
 
 
 impl<T: ByteProvider> ObjParser<T> {
-    fn read_obj(&mut self) -> std::io::Result<Object> {
+    pub fn read_obj(&mut self) -> std::io::Result<Object> {
         let first = self.tkn.next()?;
         match &first[..] {
             b"true" => Ok(Object::Bool(true)),
