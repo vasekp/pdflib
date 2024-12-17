@@ -148,7 +148,7 @@ impl<T: ByteProvider> ObjParser<T> {
                     .map_err(|_| std::io::Error::other("Malformed number"))?)),
             b"(" => self.read_lit_string(),
             b"<" => self.read_hex_string(),
-            b"/" => self.read_name(),
+            b"/" => self.read_name().map(Object::Name),
             b"[" => self.read_array(),
             b"<<" => self.read_dict(),
             tk => todo!("{:?}", std::str::from_utf8(tk))
@@ -242,11 +242,7 @@ impl<T: ByteProvider> ObjParser<T> {
         Ok(Object::String(ret))
     }
 
-    fn read_name(&mut self) -> std::io::Result<Object> {
-        Ok(Object::Name(self.read_name_inner()?))
-    }
-
-    fn read_name_inner(&mut self) -> std::io::Result<Name> {
+    fn read_name(&mut self) -> std::io::Result<Name> {
         match self.tkn.bytes().peek() {
             Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Name(Vec::new())),
             None => return Ok(Name(Vec::new())),
@@ -287,7 +283,7 @@ impl<T: ByteProvider> ObjParser<T> {
         loop {
             let key = match &self.tkn.next()?[..] {
                 b">>" => break,
-                b"/" => self.read_name_inner()?,
+                b"/" => self.read_name()?,
                 _ => return Err(std::io::Error::other("Malformed dictionary"))
             };
             let value = self.read_obj()?;
