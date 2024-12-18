@@ -1,5 +1,4 @@
 use std::io::{BufRead, Cursor, Seek};
-use std::error::Error;
 
 use crate::base::*;
 
@@ -138,7 +137,7 @@ impl<T: ByteProvider> Parser<T> {
         self.tkn.pos()
     }
 
-    pub fn read_obj(&mut self) -> std::io::Result<Object> {
+    pub fn read_obj(&mut self) -> Result<Object, Error> {
         let first = self.tkn.next()?;
         match &first[..] {
             b"true" => Ok(Object::Bool(true)),
@@ -155,19 +154,19 @@ impl<T: ByteProvider> Parser<T> {
             b"/" => self.read_name().map(Object::Name),
             b"[" => self.read_array(),
             b"<<" => self.read_dict(),
-            b"R" => Err(std::io::Error::other("Unexcepted token: R")),
+            b"R" => Err(Error::Parse("Unexcepted token: R")),
             _ => todo!("{:?}", std::str::from_utf8(&first))
         }
     }
 
-    fn read_number(&mut self) -> std::io::Result<Number> {
+    fn read_number(&mut self) -> Result<Number, Error> {
         Self::to_number_inner(&self.tkn.next()?)
-            .map_err(|_| std::io::Error::other("Malformed number"))
+            .map_err(|_| Error::Parse("Malformed number"))
     }
 
-    fn read_number_or_indirect(&mut self) -> std::io::Result<Object> {
+    fn read_number_or_indirect(&mut self) -> Result<Object, Error> {
         let num = Self::to_number_inner(&self.tkn.next()?)
-            .map_err(|_| std::io::Error::other("Malformed number"))?;
+            .map_err(|_| Error::Parse("Malformed number"))?;
         let Number::Int(num) = num else {
             return Ok(Object::Number(num))
         };
@@ -188,7 +187,7 @@ impl<T: ByteProvider> Parser<T> {
         Ok(Object::Number(Number::Int(num)))
     }
 
-    fn to_number_inner(tok: &Token) -> Result<Number, Box<dyn Error>> {
+    fn to_number_inner(tok: &Token) -> Result<Number, Box<dyn std::error::Error>> {
         if tok.contains(&b'e') || tok.contains(&b'E') {
             return Err("".into());
         }
@@ -199,7 +198,7 @@ impl<T: ByteProvider> Parser<T> {
         }
     }
 
-    fn read_lit_string(&mut self) -> std::io::Result<Object> {
+    fn read_lit_string(&mut self) -> Result<Object, Error> {
         let mut ret = Vec::new();
         let mut parens = 0;
         let bytes = self.tkn.bytes();
@@ -244,7 +243,7 @@ impl<T: ByteProvider> Parser<T> {
         Ok(Object::String(ret))
     }
 
-    fn read_hex_string(&mut self) -> std::io::Result<Object> {
+    fn read_hex_string(&mut self) -> Result<Object, Error> {
         let mut msd = None;
         let mut ret = Vec::new();
         let bytes = self.tkn.bytes();
@@ -259,7 +258,7 @@ impl<T: ByteProvider> Parser<T> {
                     break;
                 },
                 d if CharClass::of(d) == CharClass::Space => continue,
-                _ => return Err(std::io::Error::other("Malformed hex string"))
+                _ => return Err(Error::Parse("Malformed hex string"))
             };
             match msd {
                 None => msd = Some(dig),
@@ -269,7 +268,7 @@ impl<T: ByteProvider> Parser<T> {
         Ok(Object::String(ret))
     }
 
-    fn read_name(&mut self) -> std::io::Result<Name> {
+    fn read_name(&mut self) -> Result<Name, Error> {
         match self.tkn.bytes().peek() {
             Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Name(Vec::new())),
             None => return Ok(Name(Vec::new())),
@@ -285,14 +284,14 @@ impl<T: ByteProvider> Parser<T> {
             b'0'..=b'9' => Ok(c - b'0'),
             b'a'..=b'f' => Ok(c - b'a' + 10),
             b'A'..=b'F' => Ok(c - b'A' + 10),
-            _ => Err(std::io::Error::other("Malformed name"))
+            _ => Err(Error::Parse("Malformed name"))
         };
         for part in parts {
             if part.len() < 2 {
-                return Err(std::io::Error::other("Malformed name"));
+                return Err(Error::Parse("Malformed name"));
             }
             if &part[0..=1] == b"00" {
-                return Err(std::io::Error::other("Illegal name (contains #00)"));
+                return Err(Error::Parse("Illegal name (contains #00)"));
             }
             let d1 = hex(part[0])?;
             let d2 = hex(part[1])?;
@@ -302,7 +301,7 @@ impl<T: ByteProvider> Parser<T> {
         Ok(Name(ret))
     }
 
-    fn read_array(&mut self) -> std::io::Result<Object> {
+    fn read_array(&mut self) -> Result<Object, Error> {
         let mut vec = Vec::new();
         loop {
             let tk = self.tkn.next()?;
@@ -313,13 +312,13 @@ impl<T: ByteProvider> Parser<T> {
         Ok(Object::Array(vec))
     }
 
-    fn read_dict(&mut self) -> std::io::Result<Object> {
+    fn read_dict(&mut self) -> Result<Object, Error> {
         let mut dict = Vec::new();
         loop {
             let key = match &self.tkn.next()?[..] {
                 b">>" => break,
                 b"/" => self.read_name()?,
-                _ => return Err(std::io::Error::other("Malformed dictionary"))
+                _ => return Err(Error::Parse("Malformed dictionary"))
             };
             let value = self.read_obj()?;
             dict.push((key, value));
@@ -327,7 +326,7 @@ impl<T: ByteProvider> Parser<T> {
         Ok(Object::Dict(dict))
     }
 
-    pub fn locate_trailer(&mut self) -> std::io::Result<u64> {
+    pub fn locate_trailer(&mut self) -> Result<u64, Error> {
         let bytes = self.tkn.bytes();
         let len = bytes.seek(std::io::SeekFrom::End(0))?;
         let buf_size = std::cmp::min(len, 1024);
@@ -338,7 +337,7 @@ impl<T: ByteProvider> Parser<T> {
         bytes.read_exact(&mut data)?;
         let sxref = data.windows(9)
             .rposition(|w| w == b"startxref")
-            .ok_or(std::io::Error::other("startxref not found"))?;
+            .ok_or(Error::Parse("startxref not found"))?;
         Ok(len - buf_size + (sxref as u64))
     }
 }
