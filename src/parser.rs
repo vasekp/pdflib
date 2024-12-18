@@ -120,6 +120,16 @@ impl<T: ByteProvider> Tokenizer<T> {
         assert!(self.stack.is_empty());
         &mut self.bytes
     }
+
+    fn seek_to(&mut self, pos: u64) -> std::io::Result<()> {
+        self.stack.clear();
+        self.bytes.seek(std::io::SeekFrom::Start(pos)).map(|_| ())
+    }
+
+    fn pos(&mut self) -> std::io::Result<u64> {
+        assert!(self.stack.is_empty());
+        self.bytes.stream_position()
+    }
 }
 
 impl<T: Into<String>> From<T> for Tokenizer<Cursor<String>> {
@@ -135,6 +145,18 @@ pub struct ObjParser<T: ByteProvider> {
 
 
 impl<T: ByteProvider> ObjParser<T> {
+    pub fn new(reader: T) -> Self {
+        Self { tkn: Tokenizer::new(reader) }
+    }
+
+    pub fn seek_to(&mut self, pos: u64) -> std::io::Result<()> {
+        self.tkn.seek_to(pos)
+    }
+
+    pub fn pos(&mut self) -> std::io::Result<u64> {
+        self.tkn.pos()
+    }
+
     pub fn read_obj(&mut self) -> std::io::Result<Object> {
         let first = self.tkn.next()?;
         match &first[..] {
@@ -330,6 +352,7 @@ impl<T: Into<String>> From<T> for ObjParser<Cursor<String>> {
         ObjParser { tkn: Tokenizer::from(input) }
     }
 }
+
 
 #[cfg(test)]
 mod tests {
