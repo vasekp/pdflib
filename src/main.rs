@@ -8,5 +8,6 @@ fn main() -> std::io::Result<()> {
     let mut parser = Parser::new(BufReader::new(f));
     parser.seek_to(335)?;
     println!("{}", parser.read_obj()?);
+    println!("{}", parser.locate_trailer()?);
     Ok(())
 }

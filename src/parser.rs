@@ -326,6 +326,21 @@ impl<T: ByteProvider> Parser<T> {
         }
         Ok(Object::Dict(dict))
     }
+
+    pub fn locate_trailer(&mut self) -> std::io::Result<u64> {
+        let bytes = self.tkn.bytes();
+        let len = bytes.seek(std::io::SeekFrom::End(0))?;
+        let buf_size = std::cmp::min(len, 1024);
+        bytes.seek(std::io::SeekFrom::End(-(buf_size as i64)))?;
+        let mut data = Vec::new();
+        // TODO: use read_buf_exact when stabilized
+        data.resize(buf_size as usize, 0);
+        bytes.read_exact(&mut data)?;
+        let sxref = data.windows(9)
+            .rposition(|w| w == b"startxref")
+            .ok_or(std::io::Error::other("startxref not found"))?;
+        Ok(len - buf_size + (sxref as u64))
+    }
 }
 
 impl<T: Into<String>> From<T> for Parser<Cursor<String>> {
