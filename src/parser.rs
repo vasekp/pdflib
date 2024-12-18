@@ -1,4 +1,4 @@
-use std::io::{BufRead, Cursor};
+use std::io::{BufRead, Cursor, Seek};
 use std::fmt::Debug;
 use std::error::Error;
 
@@ -23,13 +23,7 @@ impl CharClass {
 }
 
 
-pub trait ByteProvider {
-    fn next_or_eof(&mut self) -> std::io::Result<u8>;
-    fn next_if(&mut self, cond: impl FnOnce(u8) -> bool) -> Option<u8>;
-    fn peek(&mut self) -> Option<u8>;
-}
-
-impl<T: BufRead> ByteProvider for T {
+pub trait ByteProvider: BufRead + Seek {
     fn peek(&mut self) -> Option<u8> {
         match self.fill_buf() {
             Ok(buf) => Some(buf[0]),
@@ -59,6 +53,8 @@ impl<T: BufRead> ByteProvider for T {
         }
     }
 }
+
+impl<T: BufRead + Seek> ByteProvider for T { }
 
 
 type Token = Vec<u8>;
