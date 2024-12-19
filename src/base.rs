@@ -7,7 +7,7 @@ pub enum Object {
     String(Vec<u8>),
     Name(Name),
     Array(Vec<Object>),
-    Dict(Vec<(Name, Object)>),
+    Dict(Dict),
     //Stream(Vec<(Name, Object)>, Vec<u8>),
     Indirect(ObjRef),
     Null
@@ -39,13 +39,7 @@ impl Display for Object {
                 }
                 f.write_str("]")
             },
-            Object::Dict(dict) => {
-                f.write_str("<< ")?;
-                for (key, val) in dict {
-                    write!(f, "{key} {val} ")?;
-                }
-                f.write_str(">>")
-            },
+            Object::Dict(dict) => write!(f, "{}", dict),
             Object::Indirect(ObjRef(num, gen)) => write!(f, "{num} {gen} R"),
             Object::Null => f.write_str("null")
         }
@@ -111,6 +105,20 @@ impl Debug for Name {
 
 #[derive(PartialEq, Debug)]
 pub struct ObjRef(pub u64, pub u16);
+
+
+#[derive(Debug, PartialEq)]
+pub struct Dict(pub Vec<(Name, Object)>);
+
+impl Display for Dict {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("<< ")?;
+        for (key, val) in &self.0 {
+            write!(f, "{key} {val} ")?;
+        }
+        f.write_str(">>")
+    }
+}
 
 
 #[derive(Debug, PartialEq)]
@@ -189,22 +197,22 @@ mod tests {
                 Object::new_name("SomeName")
         ])), "[ 549 3.14 false (Ralph) /SomeName ]");
         assert_eq!(format!("{}", Object::Array(vec![Object::Array(vec![Object::Bool(true)])])), "[ [ true ] ]");
-        assert_eq!(format!("{}", Object::Dict(vec![
+        assert_eq!(format!("{}", Object::Dict(Dict(vec![
             (Name::from("Type"), Object::new_name("Example")),
             (Name::from("Subtype"), Object::new_name("DictionaryExample")),
             (Name::from("Version"), Object::Number(Number::Real(0.01))),
             (Name::from("IntegerItem"), Object::Number(Number::Int(12))),
             (Name::from("StringItem"), Object::new_string("a string")),
-            (Name::from("Subdictionary"), Object::Dict(vec![
+            (Name::from("Subdictionary"), Object::Dict(Dict(vec![
                 (Name::from("Item1"), Object::Number(Number::Real(0.4))),
                 (Name::from("Item2"), Object::Bool(true)),
                 (Name::from("LastItem"), Object::new_string("not !")),
                 (Name::from("VeryLastItem"), Object::new_string("OK"))
-            ]))
-        ])), "<< /Type /Example /Subtype /DictionaryExample /Version 0.01 /IntegerItem 12 \
+            ])))
+        ]))), "<< /Type /Example /Subtype /DictionaryExample /Version 0.01 /IntegerItem 12 \
         /StringItem (a string) /Subdictionary << /Item1 0.4 /Item2 true /LastItem (not !) \
         /VeryLastItem (OK) >> >>");
-        assert_eq!(format!("{}", Object::Dict(vec![
-            (Name::from("Length"), Object::Indirect(ObjRef(8, 0)))])), "<< /Length 8 0 R >>");
+        assert_eq!(format!("{}", Object::Dict(Dict(vec![
+            (Name::from("Length"), Object::Indirect(ObjRef(8, 0)))]))), "<< /Length 8 0 R >>");
     }
 }

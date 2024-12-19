@@ -323,7 +323,7 @@ impl<T: ByteProvider> Parser<T> {
             let value = self.read_obj()?;
             dict.push((key, value));
         }
-        Ok(Object::Dict(dict))
+        Ok(Object::Dict(Dict(dict)))
     }
 
     pub fn locate_trailer(&mut self) -> Result<u64, Error> {
@@ -511,27 +511,27 @@ are the same.) (These two strings are the same.)");
         /VeryLastItem (OK)
         >>
     >>");
-        assert_eq!(parser.read_obj().unwrap(), Object::Dict(vec![
+        assert_eq!(parser.read_obj().unwrap(), Object::Dict(Dict(vec![
             (Name::from("Type"), Object::new_name("Example")),
             (Name::from("Subtype"), Object::new_name("DictionaryExample")),
             (Name::from("Version"), Object::Number(Number::Real(0.01))),
             (Name::from("IntegerItem"), Object::Number(Number::Int(12))),
             (Name::from("StringItem"), Object::new_string("a string")),
-            (Name::from("Subdictionary"), Object::Dict(vec![
+            (Name::from("Subdictionary"), Object::Dict(Dict(vec![
                 (Name::from("Item1"), Object::Number(Number::Real(0.4))),
                 (Name::from("Item2"), Object::Bool(true)),
                 (Name::from("LastItem"), Object::new_string("not !")),
                 (Name::from("VeryLastItem"), Object::new_string("OK"))
-            ]))
-        ]));
+            ])))
+        ])));
     }
 
     #[test]
     fn test_read_indirect() {
         let mut parser = Parser::from("<</Length 8 0 R>>");
-        assert_eq!(parser.read_obj().unwrap(), Object::Dict(vec![
+        assert_eq!(parser.read_obj().unwrap(), Object::Dict(Dict(vec![
             (Name::from("Length"), Object::Indirect(ObjRef(8, 0)))
-        ]));
+        ])));
 
         let mut parser = Parser::from("1 2 3 R 4 R");
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
