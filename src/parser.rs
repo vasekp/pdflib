@@ -243,14 +243,21 @@ impl<T: ByteProvider> Parser<T> {
         Ok(Object::Number(Number::Int(num)))
     }
 
-    fn to_number_inner(tok: &Token) -> Result<Number, Box<dyn std::error::Error>> {
+    fn parse<U: std::str::FromStr>(bstr: &[u8]) -> Result<U, Error> {
+        std::str::from_utf8(bstr)
+            .map_err(|_| Error::Parse("parse error"))?
+            .parse::<U>()
+            .map_err(|_| Error::Parse("parse error"))
+    }
+
+    fn to_number_inner(tok: &Token) -> Result<Number, Error> {
         if tok.contains(&b'e') || tok.contains(&b'E') {
-            return Err("".into());
+            return Err(Error::Parse("parse error"))
         }
         if tok.contains(&b'.') {
-            Ok(Number::Real(std::str::from_utf8(tok)?.parse::<f64>()?))
+            Ok(Number::Real(Self::parse::<f64>(tok)?))
         } else {
-            Ok(Number::Int(std::str::from_utf8(tok)?.parse::<i64>()?))
+            Ok(Number::Int(Self::parse::<i64>(tok)?))
         }
     }
 
@@ -382,19 +389,52 @@ impl<T: ByteProvider> Parser<T> {
         Ok(Object::Dict(Dict(dict)))
     }
 
-    pub fn locate_trailer(&mut self) -> Result<u64, Error> {
+    pub fn entrypoint(&mut self) -> Result<XRef, Error> {
         let bytes = self.tkn.bytes();
         let len = bytes.seek(std::io::SeekFrom::End(0))?;
         let buf_size = std::cmp::min(len, 1024);
+
+        // Read last 1024 bytes
         bytes.seek(std::io::SeekFrom::End(-(buf_size as i64)))?;
-        let mut data = Vec::new();
         // TODO: use read_buf_exact when stabilized
-        data.resize(buf_size as usize, 0);
+        let mut data = vec![0; buf_size as usize];
         bytes.read_exact(&mut data)?;
+
+        // Find "startxref<EOL>number<EOL>"
         let sxref = data.windows(9)
             .rposition(|w| w == b"startxref")
             .ok_or(Error::Parse("startxref not found"))?;
-        Ok(len - buf_size + (sxref as u64))
+        let mut cur = Cursor::new(&data[sxref..]);
+        cur.skip_past_eol()?;
+        let sxref = Self::parse::<u64>(&ByteProvider::read_line(&mut cur)?)
+            .map_err(|_| Error::Parse("malformed startxref"))?;
+        bytes.seek(std::io::SeekFrom::Start(sxref))?;
+
+        // Read xref table. TODO: XRef stream
+        if self.tkn.next()? != b"xref" {
+            return Err(Error::Parse("xref not found"));
+        }
+        let bytes = self.tkn.bytes();
+        bytes.skip_past_eol()?;
+        loop {
+            let line = ByteProvider::read_line(bytes)?;
+            if line == b"trailer" { break; }
+            let index = line.iter().position(|c| *c == b' ')
+                .ok_or(Error::Parse("malformed xref table"))?;
+            /*let start = Self::parse::<u64>(&line[..index])
+                .map_err(|_| Error::Parse("malformed xref table"))?;*/
+            let size = Self::parse::<u64>(&line[(index+1)..])
+                .map_err(|_| Error::Parse("malformed xref table"))?;
+            bytes.seek(std::io::SeekFrom::Current(20 * (size as i64)))?;
+        }
+        let trailer = match self.read_obj()? {
+            Object::Dict(dict) => dict,
+            _ => return Err(Error::Parse("malformed trailer"))
+        };
+        Ok(XRef {
+            table: Default::default(),
+            trailer
+        })
     }
 }
 
