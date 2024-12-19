@@ -173,10 +173,10 @@ impl<T: ByteProvider> Parser<T> {
         assert!(num >= 0);
         let gen_tk = self.tkn.next()?;
         match Self::to_number_inner(&gen_tk) {
-            Ok(Number::Int(gen)) if gen <= u32::MAX as i64 => {
+            Ok(Number::Int(gen)) if gen <= u16::MAX as i64 => {
                 let r_tk = self.tkn.next()?;
                 if r_tk == b"R" {
-                    return Ok(Object::Indirect(ObjRef(num as u64, gen as u32)));
+                    return Ok(Object::Indirect(ObjRef(num as u64, gen as u16)));
                 } else {
                     self.tkn.unread(r_tk);
                     self.tkn.unread(gen_tk);

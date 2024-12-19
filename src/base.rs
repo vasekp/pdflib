@@ -110,7 +110,7 @@ impl Debug for Name {
 }
 
 #[derive(PartialEq, Debug)]
-pub struct ObjRef(pub u64, pub u32);
+pub struct ObjRef(pub u64, pub u16);
 
 
 #[derive(Debug, PartialEq)]
