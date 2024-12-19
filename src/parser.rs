@@ -176,7 +176,7 @@ impl<T: ByteProvider> Parser<T> {
             Ok(Number::Int(gen)) if gen <= u16::MAX as i64 => {
                 let r_tk = self.tkn.next()?;
                 if r_tk == b"R" {
-                    return Ok(Object::Indirect(ObjRef(num as u64, gen as u16)));
+                    return Ok(Object::Ref(ObjRef(num as u64, gen as u16)));
                 } else {
                     self.tkn.unread(r_tk);
                     self.tkn.unread(gen_tk);
@@ -530,12 +530,12 @@ are the same.) (These two strings are the same.)");
     fn test_read_indirect() {
         let mut parser = Parser::from("<</Length 8 0 R>>");
         assert_eq!(parser.read_obj().unwrap(), Object::Dict(Dict(vec![
-            (Name::from("Length"), Object::Indirect(ObjRef(8, 0)))
+            (Name::from("Length"), Object::Ref(ObjRef(8, 0)))
         ])));
 
         let mut parser = Parser::from("1 2 3 R 4 R");
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Indirect(ObjRef(2, 3)));
+        assert_eq!(parser.read_obj().unwrap(), Object::Ref(ObjRef(2, 3)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(4)));
         assert!(parser.read_obj().is_err());
     }

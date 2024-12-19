@@ -9,7 +9,7 @@ pub enum Object {
     Array(Vec<Object>),
     Dict(Dict),
     //Stream(Vec<(Name, Object)>, Vec<u8>),
-    Indirect(ObjRef),
+    Ref(ObjRef),
     Null
 }
 
@@ -40,7 +40,7 @@ impl Display for Object {
                 f.write_str("]")
             },
             Object::Dict(dict) => write!(f, "{}", dict),
-            Object::Indirect(ObjRef(num, gen)) => write!(f, "{num} {gen} R"),
+            Object::Ref(ObjRef(num, gen)) => write!(f, "{num} {gen} R"),
             Object::Null => f.write_str("null")
         }
     }
@@ -213,6 +213,6 @@ mod tests {
         /StringItem (a string) /Subdictionary << /Item1 0.4 /Item2 true /LastItem (not !) \
         /VeryLastItem (OK) >> >>");
         assert_eq!(format!("{}", Object::Dict(Dict(vec![
-            (Name::from("Length"), Object::Indirect(ObjRef(8, 0)))]))), "<< /Length 8 0 R >>");
+            (Name::from("Length"), Object::Ref(ObjRef(8, 0)))]))), "<< /Length 8 0 R >>");
     }
 }
