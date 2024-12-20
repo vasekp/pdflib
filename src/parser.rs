@@ -416,25 +416,47 @@ impl<T: ByteProvider> Parser<T> {
         }
         let bytes = self.tkn.bytes();
         bytes.skip_past_eol()?;
+        let mut table = std::collections::BTreeMap::new();
+        let err = || Error::Parse("malformed xref table");
         loop {
             let line = ByteProvider::read_line(bytes)?;
             if line == b"trailer" { break; }
-            let index = line.iter().position(|c| *c == b' ')
-                .ok_or(Error::Parse("malformed xref table"))?;
-            /*let start = Self::parse::<u64>(&line[..index])
-                .map_err(|_| Error::Parse("malformed xref table"))?;*/
-            let size = Self::parse::<u64>(&line[(index+1)..])
-                .map_err(|_| Error::Parse("malformed xref table"))?;
-            bytes.seek(std::io::SeekFrom::Current(20 * (size as i64)))?;
+            let index = line.iter().position(|c| *c == b' ').ok_or_else(err)?;
+            let start = Self::parse::<u64>(&line[..index]).map_err(|_| err())?;
+            let size = Self::parse::<u64>(&line[(index+1)..]).map_err(|_| err())?;
+            /*bytes.seek(std::io::SeekFrom::Current(20 * (size as i64)))?;*/
+            let mut line = [0u8; 20];
+            for num in start..(start+size) {
+                bytes.read_exact(&mut line)?;
+                if line[10] != b' ' || line[16] != b' ' {
+                    return Err(err());
+                }
+                let v = Self::parse::<u64>(&line[0..10]).map_err(|_| err())?;
+                let gen = Self::parse::<u16>(&line[11..16]).map_err(|_| err())?;
+                match line[17] {
+                    b'n' => table.insert(num, Record::Used{gen, offset: v}),
+                    b'f' => table.insert(num, Record::Free{gen, next: v}),
+                    _ => return Err(err())
+                };
+            }
         }
         let trailer = match self.read_obj()? {
             Object::Dict(dict) => dict,
             _ => return Err(Error::Parse("malformed trailer"))
         };
-        Ok(XRef {
-            table: Default::default(),
-            trailer
-        })
+        Ok(XRef{table, trailer})
+    }
+
+    pub fn read_obj_indirect(&mut self, num: u64, gen: u16) -> Result<Object, Error> {
+        let Number::Int(n2) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
+        if n2 != num as i64 { return Err(Error::Parse("number does not match")) };
+        let Number::Int(g2) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
+        if g2 != gen as i64 { return Err(Error::Parse("number does not match")) };
+        if self.tkn.read_token_nonempty()? == b"obj" {
+            self.read_obj()
+        } else {
+            Err(Error::Parse("unexpected token"))
+        }
     }
 }
 
