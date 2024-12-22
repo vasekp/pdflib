@@ -419,7 +419,7 @@ impl<T: ByteProvider> Parser<T> {
         let mut table = std::collections::BTreeMap::new();
         let err = || Error::Parse("malformed xref table");
         loop {
-            let line = ByteProvider::read_line(bytes)?;
+            let line = ByteProvider::read_line(bytes)?.trim_ascii_end().to_owned();
             if line == b"trailer" { break; }
             let index = line.iter().position(|c| *c == b' ').ok_or_else(err)?;
             let start = Self::parse::<u64>(&line[..index]).map_err(|_| err())?;
