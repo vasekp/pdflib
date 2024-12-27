@@ -15,10 +15,20 @@ fn main() -> Result<(), pdflib::base::Error> {
             for (num, rec) in xref.table {
                 let Record::Used{gen, offset} = rec else { continue };
                 parser.seek_to(offset)?;
-                let TLO::IndirObject(ObjRef(n2, g2), obj) = parser.read_obj_toplevel()? else { todo!() };
-                assert_eq!(n2, num);
-                assert_eq!(g2, gen);
-                println!("{num} {gen}: {}", obj);
+                match parser.read_obj_toplevel()? {
+                    TLO::IndirObject(ObjRef(n2, g2), obj) => {
+                        assert_eq!(n2, num);
+                        assert_eq!(g2, gen);
+                        println!("{num} {gen}: {}", obj);
+                    },
+                    TLO::Stream(ObjRef(n2, g2), stm) => {
+                        assert_eq!(n2, num);
+                        assert_eq!(g2, gen);
+                        let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
+                        println!("{num} {gen}: {dict} stream @ {offset}");
+                    },
+                    _ => unimplemented!()
+                }
             }
         },
         _ => todo!()

@@ -8,8 +8,8 @@ pub enum TLO {
 }
 
 pub struct Stream {
-    dict: Dict,
-    data: Data
+    pub dict: Dict,
+    pub data: Data
 }
 
 pub enum Data {

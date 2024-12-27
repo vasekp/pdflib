@@ -251,7 +251,20 @@ impl<T: ByteProvider> Parser<T> {
             return Err(Error::Parse("unexpected token"));
         }
         let obj = self.read_obj()?;
-        Ok(TLO::IndirObject(ObjRef(num as u64, gen as u16), obj))
+        match &self.tkn.next()?[..] {
+            b"endobj" =>
+                Ok(TLO::IndirObject(ObjRef(num as u64, gen as u16), obj)),
+            b"stream" => {
+                let Object::Dict(dict) = obj else {
+                    return Err(Error::Parse("endobj not found"))
+                };
+                let bytes = self.tkn.bytes();
+                bytes.skip_past_eol()?;
+                let stm = Stream { dict, data: Data::Ref(bytes.stream_position()?) };
+                Ok(TLO::Stream(ObjRef(num as u64, gen as u16), stm))
+            },
+            _ => Err(Error::Parse("endobj not found"))
+        }
     }
 
     fn read_xref(&mut self) -> Result<XRef, Error> {
