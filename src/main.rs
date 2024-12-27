@@ -25,7 +25,9 @@ fn main() -> Result<(), pdflib::base::Error> {
                         assert_eq!(n2, num);
                         assert_eq!(g2, gen);
                         let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
-                        println!("{num} {gen}: {dict} stream @ {offset}");
+                        println!("{num} {gen}: {dict} stream");
+                        let data = parser.read_stream_data(offset, None)?;
+                        println!("{offset} + {} bytes (incl. EOF)", data.len());
                     },
                     _ => unimplemented!()
                 }

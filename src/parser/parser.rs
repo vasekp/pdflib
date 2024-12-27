@@ -318,6 +318,41 @@ impl<T: ByteProvider> Parser<T> {
             self.read_obj_indirect()
         }
     }
+
+    pub fn read_stream_data(&mut self, start: u64, len: Option<i64>) -> Result<Vec<u8>, Error> {
+        self.seek_to(start)?;
+        let data = match len {
+            Some(len) => {
+                if len <= 0 { return Err(Error::Parse("invalid length")); }
+                let mut data = vec![0; len as usize];
+                self.tkn.bytes().read_exact(&mut data)?;
+                data
+            },
+            None => {
+                let mut data = Vec::new();
+                let bytes = self.tkn.bytes();
+                loop {
+                    let off = bytes.stream_position()?;
+                    let line = bytes.read_line_incl()?;
+                    if let Some(pos) = line.windows(9).position(|w| w == b"endstream") {
+                        data.extend_from_slice(&line[0..pos]);
+                        bytes.seek(std::io::SeekFrom::Start(off + (pos as u64)))?;
+                        break;
+                    } else {
+                        data.extend_from_slice(&line[..]);
+                    }
+                }
+                data
+            }
+        };
+        if self.tkn.next()? != b"endstream" {
+            return Err(Error::Parse("endstream not found"));
+        }
+        if self.tkn.next()? != b"endobj" {
+            return Err(Error::Parse("endobj missing"));
+        }
+        Ok(data)
+    }
 }
 
 impl<T: Into<String>> From<T> for Parser<Cursor<String>> {
