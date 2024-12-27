@@ -8,22 +8,16 @@ fn main() -> Result<(), pdflib::base::Error> {
     let f = File::open("tests/test1-short.pdf")?;
     let mut parser = Parser::new(BufReader::new(f));
     let entry = parser.entrypoint()?;
-    parser.seek_to(entry)?;
-    match parser.read_obj_toplevel()? {
+    match parser.read_tlo_at(entry)? {
         TLO::XRef(xref) => {
             println!("{}", xref.trailer);
             for (&num, rec) in &xref.table {
                 let &Record::Used{gen, offset} = rec else { continue };
-                parser.seek_to(offset)?;
-                match parser.read_obj_toplevel()? {
-                    TLO::IndirObject(ObjRef(n2, g2), obj) => {
-                        assert_eq!(n2, num);
-                        assert_eq!(g2, gen);
+                match parser.read_obj_at(offset, num, gen)? {
+                    TLO::IndirObject(_, obj) => {
                         println!("{num} {gen}: {}", obj);
                     },
-                    TLO::Stream(ObjRef(n2, g2), stm) => {
-                        assert_eq!(n2, num);
-                        assert_eq!(g2, gen);
+                    TLO::Stream(_, stm) => {
                         let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
                         println!("{num} {gen}: {dict} stream");
                         let data = parser.read_stream_data(offset, None)?;
@@ -42,12 +36,8 @@ fn main() -> Result<(), pdflib::base::Error> {
                                 if g2 != gen {
                                     return Err(Error::Parse("Length object not found"))
                                 };
-                                parser.seek_to(len_off)?;
-                                match parser.read_obj_toplevel()? {
-                                    TLO::IndirObject(ObjRef(n2, g2),
-                                        Object::Number(Number::Int(len)))
-                                        if n2 == num && g2 == gen
-                                            => len,
+                                match parser.read_obj_at(len_off, num, gen)? {
+                                    TLO::IndirObject(_, Object::Number(Number::Int(len))) => len,
                                     _ => return Err(Error::Parse("Length object of wrong type"))
                                 }
                             },

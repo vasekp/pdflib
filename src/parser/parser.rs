@@ -309,7 +309,7 @@ impl<T: ByteProvider> Parser<T> {
         Ok(XRef{table, trailer})
     }
 
-    pub fn read_obj_toplevel(&mut self) -> Result<TLO, Error> {
+    fn read_tlo_inner(&mut self) -> Result<TLO, Error> {
         let tk = self.tkn.next()?;
         if tk == b"xref" {
             Ok(TLO::XRef(self.read_xref()?))
@@ -317,6 +317,23 @@ impl<T: ByteProvider> Parser<T> {
             self.tkn.unread(tk);
             self.read_obj_indirect()
         }
+    }
+
+    pub fn read_tlo_at(&mut self, start: u64) -> Result<TLO, Error> {
+        self.seek_to(start)?;
+        self.read_tlo_inner()
+    }
+
+    pub fn read_obj_at(&mut self, start: u64, num: u64, gen: u16) -> Result<TLO, Error> {
+        let obj = self.read_tlo_at(start)?;
+        let &ObjRef(n2, g2) = match &obj {
+            TLO::IndirObject(oref, _) | TLO::Stream(oref, _) => oref,
+            _ => return Err(Error::Parse("object not found"))
+        };
+        if n2 != num || g2 != gen {
+            return Err(Error::Parse("object number mismatch"));
+        }
+        Ok(obj)
     }
 
     pub fn read_stream_data(&mut self, start: u64, len: Option<i64>) -> Result<Vec<u8>, Error> {
