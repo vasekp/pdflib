@@ -220,7 +220,7 @@ impl<T: ByteProvider> Parser<T> {
         Ok(Object::Dict(Dict(dict)))
     }
 
-    pub fn entrypoint(&mut self) -> Result<XRef, Error> {
+    pub fn entrypoint(&mut self) -> Result<u64, Error> {
         let bytes = self.tkn.bytes();
         let len = bytes.seek(std::io::SeekFrom::End(0))?;
         let buf_size = std::cmp::min(len, 1024);
@@ -239,12 +239,22 @@ impl<T: ByteProvider> Parser<T> {
         cur.skip_past_eol()?;
         let sxref = Self::parse::<u64>(&ByteProvider::read_line(&mut cur)?)
             .map_err(|_| Error::Parse("malformed startxref"))?;
-        bytes.seek(std::io::SeekFrom::Start(sxref))?;
+        Ok(sxref)
+    }
 
-        // Read xref table. TODO: XRef stream
-        if self.tkn.next()? != b"xref" {
-            return Err(Error::Parse("xref not found"));
+    fn read_obj_indirect(&mut self) -> Result<TLO, Error> {
+        let Number::Int(num) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
+        if num < 0 { return Err(Error::Parse("invalid object number")); }
+        let Number::Int(gen) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
+        if gen < 0 || gen > u16::MAX.into() { return Err(Error::Parse("invalid generation number")); }
+        if self.tkn.read_token_nonempty()? != b"obj" {
+            return Err(Error::Parse("unexpected token"));
         }
+        let obj = self.read_obj()?;
+        Ok(TLO::IndirObject(ObjRef(num as u64, gen as u16), obj))
+    }
+
+    fn read_xref(&mut self) -> Result<XRef, Error> {
         let bytes = self.tkn.bytes();
         bytes.skip_past_eol()?;
         let mut table = std::collections::BTreeMap::new();
@@ -278,15 +288,13 @@ impl<T: ByteProvider> Parser<T> {
         Ok(XRef{table, trailer})
     }
 
-    pub fn read_obj_indirect(&mut self, num: u64, gen: u16) -> Result<Object, Error> {
-        let Number::Int(n2) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
-        if n2 != num as i64 { return Err(Error::Parse("number does not match")) };
-        let Number::Int(g2) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
-        if g2 != gen as i64 { return Err(Error::Parse("number does not match")) };
-        if self.tkn.read_token_nonempty()? == b"obj" {
-            self.read_obj()
+    pub fn read_obj_toplevel(&mut self) -> Result<TLO, Error> {
+        let tk = self.tkn.next()?;
+        if tk == b"xref" {
+            Ok(TLO::XRef(self.read_xref()?))
         } else {
-            Err(Error::Parse("unexpected token"))
+            self.tkn.unread(tk);
+            self.read_obj_indirect()
         }
     }
 }
