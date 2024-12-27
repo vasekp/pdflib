@@ -30,7 +30,7 @@ pub trait ByteProvider: BufRead + Seek {
         }
     }
 
-    fn read_line(&mut self) -> std::io::Result<Vec<u8>> {
+    fn read_line_inner(&mut self, include_eol: bool) -> std::io::Result<Vec<u8>> {
         let mut line = Vec::new();
         loop {
             let buf = match self.fill_buf() {
@@ -48,8 +48,20 @@ pub trait ByteProvider: BufRead + Seek {
             match buf.iter().position(|c| *c == b'\n' || *c == b'\r') {
                 Some(pos) => {
                     line.extend_from_slice(&buf[..pos]);
-                    let crlf = buf[pos] == b'\r' && buf.len() > pos && buf[pos + 1] == b'\n';
-                    self.consume(pos + if crlf { 2 } else { 1 });
+                    self.consume(pos);
+                    let buf = loop {
+                        match self.fill_buf() {
+                            Ok(buf) => break buf,
+                            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                            Err(err) => return Err(err)
+                        }
+                    };
+                    let crlf = buf[0] == b'\r' && buf.len() > 1 && buf[1] == b'\n';
+                    let eol_len = if crlf { 2 } else { 1 };
+                    if include_eol {
+                        line.extend_from_slice(&buf[0..eol_len]);
+                    }
+                    self.consume(eol_len);
                     break;
                 },
                 None => {
@@ -60,6 +72,14 @@ pub trait ByteProvider: BufRead + Seek {
             }
         }
         Ok(line)
+    }
+
+    fn read_line_excl(&mut self) -> std::io::Result<Vec<u8>> {
+        self.read_line_inner(false)
+    }
+
+    fn read_line_incl(&mut self) -> std::io::Result<Vec<u8>> {
+        self.read_line_inner(true)
     }
 
     fn skip_past_eol(&mut self) -> std::io::Result<()> {
@@ -98,20 +118,29 @@ mod tests {
     #[test]
     fn test_read_line() {
         let mut bytes = Cursor::new("line 1\nline 2\rline 3\r\nline 4\n\rline 5");
-        assert_eq!(ByteProvider::read_line(&mut bytes).unwrap(), b"line 1");
-        assert_eq!(ByteProvider::read_line(&mut bytes).unwrap(), b"line 2");
-        assert_eq!(ByteProvider::read_line(&mut bytes).unwrap(), b"line 3");
-        assert_eq!(ByteProvider::read_line(&mut bytes).unwrap(), b"line 4");
-        assert_eq!(ByteProvider::read_line(&mut bytes).unwrap(), b"");
-        assert_eq!(ByteProvider::read_line(&mut bytes).unwrap(), b"line 5");
-        assert!(ByteProvider::read_line(&mut bytes).is_err());
+        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 1");
+        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 2");
+        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 3");
+        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 4");
+        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"");
+        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 5");
+        assert!(ByteProvider::read_line_excl(&mut bytes).is_err());
+
+        let mut bytes = Cursor::new("line 1\nline 2\rline 3\r\nline 4\n\rline 5");
+        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 1\n");
+        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 2\r");
+        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 3\r\n");
+        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 4\n");
+        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"\r");
+        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 5");
+        assert!(ByteProvider::read_line_incl(&mut bytes).is_err());
 
         let mut bytes = Cursor::new("line 1\nline 2\rline 3\r\nline 4\n\rline 5");
         bytes.skip_past_eol().unwrap();
         bytes.skip_past_eol().unwrap();
         bytes.skip_past_eol().unwrap();
         bytes.skip_past_eol().unwrap();
-        assert_eq!(ByteProvider::read_line(&mut bytes).unwrap(), b"");
+        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"");
         assert!(ByteProvider::skip_past_eol(&mut bytes).is_err());
     }
 }

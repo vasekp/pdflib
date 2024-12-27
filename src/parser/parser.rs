@@ -237,7 +237,7 @@ impl<T: ByteProvider> Parser<T> {
             .ok_or(Error::Parse("startxref not found"))?;
         let mut cur = Cursor::new(&data[sxref..]);
         cur.skip_past_eol()?;
-        let sxref = Self::parse::<u64>(&ByteProvider::read_line(&mut cur)?)
+        let sxref = Self::parse::<u64>(&cur.read_line_excl()?)
             .map_err(|_| Error::Parse("malformed startxref"))?;
         Ok(sxref)
     }
@@ -273,7 +273,7 @@ impl<T: ByteProvider> Parser<T> {
         let mut table = std::collections::BTreeMap::new();
         let err = || Error::Parse("malformed xref table");
         loop {
-            let line = ByteProvider::read_line(bytes)?.trim_ascii_end().to_owned();
+            let line = bytes.read_line_excl()?.trim_ascii_end().to_owned();
             if line == b"trailer" { break; }
             let index = line.iter().position(|c| *c == b' ').ok_or_else(err)?;
             let start = Self::parse::<u64>(&line[..index]).map_err(|_| err())?;
