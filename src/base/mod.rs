@@ -10,6 +10,9 @@ pub use dict::*;
 mod object;
 pub use object::*;
 
+mod stream;
+pub use stream::*;
+
 mod string;
 pub use string::*;
 

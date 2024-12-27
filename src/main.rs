@@ -13,41 +13,36 @@ fn main() -> Result<(), pdflib::base::Error> {
             println!("{}", xref.trailer);
             for (&num, rec) in &xref.table {
                 let &Record::Used{gen, offset} = rec else { continue };
-                match parser.read_obj_at(offset, num, gen)? {
-                    TLO::IndirObject(_, obj) => {
-                        println!("{num} {gen}: {}", obj);
-                    },
-                    TLO::Stream(_, stm) => {
-                        let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
-                        println!("{num} {gen}: {dict} stream");
-                        let data = parser.read_stream_data(offset, None)?;
-                        println!("{offset} + {} bytes (incl. EOF)", data.len());
+                let obj = parser.read_obj_at(offset, num, gen)?;
+                println!("{num} {gen}: {}", obj);
+                let Object::Stream(stm) = obj else { continue };
+                let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
+                println!("{num} {gen}: {dict} stream");
+                let data = parser.read_stream_data(offset, None)?;
+                println!("{offset} + {} bytes (incl. EOF)", data.len());
 
-                        let Some(len_obj) = dict.lookup(b"Length") else { continue };
-                        let len = match *len_obj {
-                            Object::Number(Number::Int(len)) => len,
-                            Object::Ref(ObjRef(num, gen)) => {
-                                let Some(rec) = xref.table.get(&num) else {
-                                    return Err(Error::Parse("Length object not found"))
-                                };
-                                let &Record::Used{gen: g2, offset: len_off} = rec else {
-                                    return Err(Error::Parse("Length object not found"))
-                                };
-                                if g2 != gen {
-                                    return Err(Error::Parse("Length object not found"))
-                                };
-                                match parser.read_obj_at(len_off, num, gen)? {
-                                    TLO::IndirObject(_, Object::Number(Number::Int(len))) => len,
-                                    _ => return Err(Error::Parse("Length object of wrong type"))
-                                }
-                            },
-                            _ => return Err(Error::Parse("Length of wrong type"))
+                let Some(len_obj) = dict.lookup(b"Length") else { continue };
+                let len = match *len_obj {
+                    Object::Number(Number::Int(len)) => len,
+                    Object::Ref(ObjRef(num, gen)) => {
+                        let Some(rec) = xref.table.get(&num) else {
+                            return Err(Error::Parse("Length object not found"))
                         };
-                        let data = parser.read_stream_data(offset, Some(len))?;
-                        println!("{offset} + {} bytes (exact)", data.len());
+                        let &Record::Used{gen: g2, offset: len_off} = rec else {
+                            return Err(Error::Parse("Length object not found"))
+                        };
+                        if g2 != gen {
+                            return Err(Error::Parse("Length object not found"))
+                        };
+                        match parser.read_obj_at(len_off, num, gen)? {
+                            Object::Number(Number::Int(len)) => len,
+                            _ => return Err(Error::Parse("Length object of wrong type"))
+                        }
                     },
-                    _ => unimplemented!()
-                }
+                    _ => return Err(Error::Parse("Length of wrong type"))
+                };
+                let data = parser.read_stream_data(offset, Some(len))?;
+                println!("{offset} + {} bytes (exact)", data.len());
             }
         },
         _ => todo!()

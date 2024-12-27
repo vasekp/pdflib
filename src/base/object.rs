@@ -4,6 +4,7 @@ use super::name::Name;
 use super::dict::Dict;
 use super::number::Number;
 use super::string::format_string;
+use super::stream::Stream;
 
 #[derive(Debug, PartialEq)]
 pub enum Object {
@@ -13,7 +14,7 @@ pub enum Object {
     Name(Name),
     Array(Vec<Object>),
     Dict(Dict),
-    //Stream(Vec<(Name, Object)>, Vec<u8>),
+    Stream(Stream),
     Ref(ObjRef),
     Null
 }
@@ -45,6 +46,7 @@ impl Display for Object {
                 f.write_str("]")
             },
             Object::Dict(dict) => write!(f, "{}", dict),
+            Object::Stream(stm) => write!(f, "{} stream...", stm.dict),
             Object::Ref(ObjRef(num, gen)) => write!(f, "{num} {gen} R"),
             Object::Null => f.write_str("null")
         }

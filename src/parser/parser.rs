@@ -269,7 +269,7 @@ impl<T: ByteProvider> Parser<T> {
                     _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
                 };
                 let stm = Stream { dict, data: Data::Ref(bytes.stream_position()?) };
-                Ok(TLO::Stream(ObjRef(num as u64, gen as u16), stm))
+                Ok(TLO::IndirObject(ObjRef(num as u64, gen as u16), Object::Stream(stm)))
             },
             _ => Err(Error::Parse("endobj not found"))
         }
@@ -324,13 +324,12 @@ impl<T: ByteProvider> Parser<T> {
         self.read_tlo_inner()
     }
 
-    pub fn read_obj_at(&mut self, start: u64, num: u64, gen: u16) -> Result<TLO, Error> {
-        let obj = self.read_tlo_at(start)?;
-        let &ObjRef(n2, g2) = match &obj {
-            TLO::IndirObject(oref, _) | TLO::Stream(oref, _) => oref,
-            _ => return Err(Error::Parse("object not found"))
+    pub fn read_obj_at(&mut self, start: u64, num: u64, gen: u16) -> Result<Object, Error> {
+        let tlo = self.read_tlo_at(start)?;
+        let TLO::IndirObject(oref, obj) = tlo else {
+            return Err(Error::Parse("object not found"))
         };
-        if n2 != num || g2 != gen {
+        if oref != ObjRef(num, gen) {
             return Err(Error::Parse("object number mismatch"));
         }
         Ok(obj)
