@@ -8,8 +8,8 @@ fn main() -> Result<(), pdflib::base::Error> {
     let f = File::open("tests/test1-short.pdf")?;
     let mut parser = Parser::new(BufReader::new(f));
     let entry = parser.entrypoint()?;
-    match parser.read_tlo_at(entry)? {
-        TLO::XRef(xref) => {
+    match parser.read_xref_at(entry)? {
+        XRef::Table(xref) => {
             println!("{}", xref.trailer);
             for (&num, rec) in &xref.table {
                 let &Record::Used{gen, offset} = rec else { continue };

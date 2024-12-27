@@ -1,6 +1,11 @@
-use super::dict::Dict;
+use super::*;
 
-pub struct XRef {
+pub enum XRef {
+    Table(XRefTable),
+    Stream(ObjRef, Stream)
+}
+
+pub struct XRefTable {
     pub table: std::collections::BTreeMap<u64, Record>,
     pub trailer: Dict
 }

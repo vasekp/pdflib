@@ -275,7 +275,7 @@ impl<T: ByteProvider> Parser<T> {
         }
     }
 
-    fn read_xref(&mut self) -> Result<XRef, Error> {
+    fn read_xref_table(&mut self) -> Result<XRefTable, Error> {
         let bytes = self.tkn.bytes();
         bytes.skip_past_eol()?;
         let mut table = std::collections::BTreeMap::new();
@@ -306,23 +306,26 @@ impl<T: ByteProvider> Parser<T> {
             Object::Dict(dict) => dict,
             _ => return Err(Error::Parse("malformed trailer"))
         };
-        Ok(XRef{table, trailer})
+        Ok(XRefTable{table, trailer})
     }
 
-    fn read_tlo_inner(&mut self) -> Result<TLO, Error> {
+    fn read_xref_inner(&mut self) -> Result<XRef, Error> {
         let tk = self.tkn.next()?;
         if tk == b"xref" {
-            Ok(TLO::XRef(self.read_xref()?))
+            Ok(XRef::Table(self.read_xref_table()?))
         } else {
             self.tkn.unread(tk);
             let (oref, obj) = self.read_obj_indirect()?;
-            Ok(TLO::IndirObject(oref, obj))
+            let Object::Stream(stm) = obj else {
+                return Err(Error::Parse("malfomed xref"))
+            };
+            Ok(XRef::Stream(oref, stm))
         }
     }
 
-    pub fn read_tlo_at(&mut self, start: u64) -> Result<TLO, Error> {
+    pub fn read_xref_at(&mut self, start: u64) -> Result<XRef, Error> {
         self.seek_to(start)?;
-        self.read_tlo_inner()
+        self.read_xref_inner()
     }
 
     pub fn read_obj_at(&mut self, start: u64, num: u64, gen: u16) -> Result<Object, Error> {
