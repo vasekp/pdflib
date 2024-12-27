@@ -242,7 +242,7 @@ impl<T: ByteProvider> Parser<T> {
         Ok(sxref)
     }
 
-    fn read_obj_indirect(&mut self) -> Result<TLO, Error> {
+    fn read_obj_indirect(&mut self) -> Result<(ObjRef, Object), Error> {
         let Number::Int(num) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
         if num < 0 { return Err(Error::Parse("invalid object number")); }
         let Number::Int(gen) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
@@ -253,7 +253,7 @@ impl<T: ByteProvider> Parser<T> {
         let obj = self.read_obj()?;
         match &self.tkn.next()?[..] {
             b"endobj" =>
-                Ok(TLO::IndirObject(ObjRef(num as u64, gen as u16), obj)),
+                Ok((ObjRef(num as u64, gen as u16), obj)),
             b"stream" => {
                 let Object::Dict(dict) = obj else {
                     return Err(Error::Parse("endobj not found"))
@@ -269,7 +269,7 @@ impl<T: ByteProvider> Parser<T> {
                     _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
                 };
                 let stm = Stream { dict, data: Data::Ref(bytes.stream_position()?) };
-                Ok(TLO::IndirObject(ObjRef(num as u64, gen as u16), Object::Stream(stm)))
+                Ok((ObjRef(num as u64, gen as u16), Object::Stream(stm)))
             },
             _ => Err(Error::Parse("endobj not found"))
         }
@@ -315,7 +315,8 @@ impl<T: ByteProvider> Parser<T> {
             Ok(TLO::XRef(self.read_xref()?))
         } else {
             self.tkn.unread(tk);
-            self.read_obj_indirect()
+            let (oref, obj) = self.read_obj_indirect()?;
+            Ok(TLO::IndirObject(oref, obj))
         }
     }
 
@@ -325,10 +326,8 @@ impl<T: ByteProvider> Parser<T> {
     }
 
     pub fn read_obj_at(&mut self, start: u64, num: u64, gen: u16) -> Result<Object, Error> {
-        let tlo = self.read_tlo_at(start)?;
-        let TLO::IndirObject(oref, obj) = tlo else {
-            return Err(Error::Parse("object not found"))
-        };
+        self.seek_to(start)?;
+        let (oref, obj) = self.read_obj_indirect()?;
         if oref != ObjRef(num, gen) {
             return Err(Error::Parse("object number mismatch"));
         }
