@@ -29,3 +29,9 @@ impl Debug for Name {
         write!(f, "{}", self)
     }
 }
+
+impl PartialEq<&[u8]> for Name {
+    fn eq(&self, other: &&[u8]) -> bool {
+        self.0 == *other
+    }
+}
