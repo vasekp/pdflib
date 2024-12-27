@@ -259,7 +259,15 @@ impl<T: ByteProvider> Parser<T> {
                     return Err(Error::Parse("endobj not found"))
                 };
                 let bytes = self.tkn.bytes();
-                bytes.skip_past_eol()?;
+                match bytes.next_or_eof()? {
+                    b'\n' => (),
+                    b'\r' => {
+                        if bytes.next_or_eof()? != b'\n' {
+                            return Err(Error::Parse("stream keyword not followed by proper EOL"));
+                        }
+                    },
+                    _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
+                };
                 let stm = Stream { dict, data: Data::Ref(bytes.stream_position()?) };
                 Ok(TLO::Stream(ObjRef(num as u64, gen as u16), stm))
             },
