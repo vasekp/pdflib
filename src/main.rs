@@ -13,7 +13,7 @@ fn main() -> Result<(), pdflib::base::Error> {
             println!("{}", xref.trailer);
             for (&num, rec) in &xref.table {
                 let &Record::Used{gen, offset} = rec else { continue };
-                let obj = parser.read_obj_at(offset, &ObjRef(num, gen))?;
+                let obj = parser.read_obj_at(offset, &ObjRef{num, gen})?;
                 println!("{num} {gen}: {}", obj);
                 let Object::Stream(stm) = obj else { continue };
                 let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };

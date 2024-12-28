@@ -47,14 +47,17 @@ impl Display for Object {
             },
             Object::Dict(dict) => write!(f, "{}", dict),
             Object::Stream(stm) => write!(f, "{} stream...", stm.dict),
-            Object::Ref(ObjRef(num, gen)) => write!(f, "{num} {gen} R"),
+            Object::Ref(ObjRef{num, gen}) => write!(f, "{num} {gen} R"),
             Object::Null => f.write_str("null")
         }
     }
 }
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-pub struct ObjRef(pub u64, pub u16);
+pub struct ObjRef {
+    pub num: u64,
+    pub gen: u16
+}
 
 
 #[cfg(test)]
@@ -94,6 +97,6 @@ mod tests {
         /StringItem (a string) /Subdictionary << /Item1 0.4 /Item2 true /LastItem (not !) \
         /VeryLastItem (OK) >> >>");
         assert_eq!(format!("{}", Object::Dict(Dict(vec![
-            (Name::from("Length"), Object::Ref(ObjRef(8, 0)))]))), "<< /Length 8 0 R >>");
+            (Name::from("Length"), Object::Ref(ObjRef{num: 8, gen: 0}))]))), "<< /Length 8 0 R >>");
     }
 }

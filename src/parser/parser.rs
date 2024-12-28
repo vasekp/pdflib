@@ -63,7 +63,7 @@ impl<T: ByteProvider> Parser<T> {
             Ok(Number::Int(gen)) if gen <= u16::MAX as i64 => {
                 let r_tk = self.tkn.next()?;
                 if r_tk == b"R" {
-                    return Ok(Object::Ref(ObjRef(num as u64, gen as u16)));
+                    return Ok(Object::Ref(ObjRef{num: num as u64, gen: gen as u16}));
                 } else {
                     self.tkn.unread(r_tk);
                     self.tkn.unread(gen_tk);
@@ -244,16 +244,17 @@ impl<T: ByteProvider> Parser<T> {
 
     fn read_obj_indirect(&mut self) -> Result<(ObjRef, Object), Error> {
         let Number::Int(num) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
-        if num < 0 { return Err(Error::Parse("invalid object number")); }
+        let num = num.try_into().map_err(|_| Error::Parse("invalid object number"))?;
         let Number::Int(gen) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
-        if gen < 0 || gen > u16::MAX.into() { return Err(Error::Parse("invalid generation number")); }
+        let gen = gen.try_into().map_err(|_| Error::Parse("invalid generation number"))?;
+        let oref = ObjRef{num, gen};
         if self.tkn.read_token_nonempty()? != b"obj" {
             return Err(Error::Parse("unexpected token"));
         }
         let obj = self.read_obj()?;
         match &self.tkn.next()?[..] {
             b"endobj" =>
-                Ok((ObjRef(num as u64, gen as u16), obj)),
+                Ok((oref, obj)),
             b"stream" => {
                 let Object::Dict(dict) = obj else {
                     return Err(Error::Parse("endobj not found"))
@@ -269,7 +270,7 @@ impl<T: ByteProvider> Parser<T> {
                     _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
                 };
                 let stm = Stream { dict, data: Data::Ref(bytes.stream_position()?) };
-                Ok((ObjRef(num as u64, gen as u16), Object::Stream(stm)))
+                Ok((oref, Object::Stream(stm)))
             },
             _ => Err(Error::Parse("endobj not found"))
         }
@@ -373,16 +374,15 @@ impl<T: ByteProvider> Parser<T> {
     }
 
     pub fn find_obj(&mut self, oref: &ObjRef, xref: &XRefTable) -> Result<Object, Error> {
-        let &ObjRef(onum, ogen) = oref;
-        let Some(rec) = xref.table.get(&onum) else {
+        let Some(rec) = xref.table.get(&oref.num) else {
             return Ok(Object::Null);
         };
         match *rec {
             Record::Used{gen, offset} => {
-                if gen != ogen {
+                if gen != oref.gen {
                     Ok(Object::Null)
                 } else {
-                    self.read_obj_at(offset, &oref)
+                    self.read_obj_at(offset, oref)
                 }
             },
             Record::Compr{..} => unimplemented!(),
@@ -553,12 +553,12 @@ are the same.) (These two strings are the same.)");
     fn test_read_indirect() {
         let mut parser = Parser::from("<</Length 8 0 R>>");
         assert_eq!(parser.read_obj().unwrap(), Object::Dict(Dict(vec![
-            (Name::from("Length"), Object::Ref(ObjRef(8, 0)))
+            (Name::from("Length"), Object::Ref(ObjRef{num: 8, gen: 0}))
         ])));
 
         let mut parser = Parser::from("1 2 3 R 4 R");
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Ref(ObjRef(2, 3)));
+        assert_eq!(parser.read_obj().unwrap(), Object::Ref(ObjRef{num: 2, gen: 3}));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(4)));
         assert!(parser.read_obj().is_err());
     }
