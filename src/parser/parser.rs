@@ -248,7 +248,7 @@ impl<T: ByteProvider> Parser<T> {
         let Number::Int(gen) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
         let gen = gen.try_into().map_err(|_| Error::Parse("invalid generation number"))?;
         let oref = ObjRef{num, gen};
-        if self.tkn.read_token_nonempty()? != b"obj" {
+        if self.tkn.next()? != b"obj" {
             return Err(Error::Parse("unexpected token"));
         }
         let obj = self.read_obj()?;

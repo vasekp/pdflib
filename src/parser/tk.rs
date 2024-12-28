@@ -39,7 +39,7 @@ impl<T: ByteProvider> Tokenizer<T> {
         }
     }
 
-    pub fn read_token_nonempty(&mut self) -> std::io::Result<Token> {
+    fn read_token_nonempty(&mut self) -> std::io::Result<Token> {
         loop {
             let tk = self.read_token()?;
             if tk != b" " { return Ok(tk); }
