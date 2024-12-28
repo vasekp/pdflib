@@ -53,7 +53,7 @@ impl Display for Object {
     }
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub struct ObjRef(pub u64, pub u16);
 
 

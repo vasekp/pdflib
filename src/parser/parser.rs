@@ -328,10 +328,10 @@ impl<T: ByteProvider> Parser<T> {
         self.read_xref_inner()
     }
 
-    pub fn read_obj_at(&mut self, start: u64, num: u64, gen: u16) -> Result<Object, Error> {
+    pub fn read_obj_at(&mut self, start: u64, oref_exp: &ObjRef) -> Result<Object, Error> {
         self.seek_to(start)?;
         let (oref, obj) = self.read_obj_indirect()?;
-        if oref != ObjRef(num, gen) {
+        if oref != *oref_exp {
             return Err(Error::Parse("object number mismatch"));
         }
         Ok(obj)

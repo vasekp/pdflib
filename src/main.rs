@@ -13,7 +13,7 @@ fn main() -> Result<(), pdflib::base::Error> {
             println!("{}", xref.trailer);
             for (&num, rec) in &xref.table {
                 let &Record::Used{gen, offset} = rec else { continue };
-                let obj = parser.read_obj_at(offset, num, gen)?;
+                let obj = parser.read_obj_at(offset, &ObjRef(num, gen))?;
                 println!("{num} {gen}: {}", obj);
                 let Object::Stream(stm) = obj else { continue };
                 let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
@@ -24,7 +24,7 @@ fn main() -> Result<(), pdflib::base::Error> {
                 let Some(len_obj) = dict.lookup(b"Length") else { continue };
                 let len = match *len_obj {
                     Object::Number(Number::Int(len)) => len,
-                    Object::Ref(ObjRef(num, gen)) => {
+                    Object::Ref(oref @ ObjRef(num, gen)) => {
                         let Some(rec) = xref.table.get(&num) else {
                             return Err(Error::Parse("Length object not found"))
                         };
@@ -34,7 +34,7 @@ fn main() -> Result<(), pdflib::base::Error> {
                         if g2 != gen {
                             return Err(Error::Parse("Length object not found"))
                         };
-                        match parser.read_obj_at(len_off, num, gen)? {
+                        match parser.read_obj_at(len_off, &oref)? {
                             Object::Number(Number::Int(len)) => len,
                             _ => return Err(Error::Parse("Length object of wrong type"))
                         }
