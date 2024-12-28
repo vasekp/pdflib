@@ -18,31 +18,24 @@ fn main() -> Result<(), pdflib::base::Error> {
                 let Object::Stream(stm) = obj else { continue };
                 let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
                 println!("{num} {gen}: {dict} stream");
-                let data = parser.read_stream_data(offset, None)?;
-                println!("{offset} + {} bytes (incl. EOF)", data.len());
 
-                let Some(len_obj) = dict.lookup(b"Length") else { continue };
-                let len = match *len_obj {
-                    Object::Number(Number::Int(len)) => len,
-                    Object::Ref(oref @ ObjRef(num, gen)) => {
-                        let Some(rec) = xref.table.get(&num) else {
-                            return Err(Error::Parse("Length object not found"))
-                        };
-                        let &Record::Used{gen: g2, offset: len_off} = rec else {
-                            return Err(Error::Parse("Length object not found"))
-                        };
-                        if g2 != gen {
-                            return Err(Error::Parse("Length object not found"))
-                        };
-                        match parser.read_obj_at(len_off, &oref)? {
-                            Object::Number(Number::Int(len)) => len,
-                            _ => return Err(Error::Parse("Length object of wrong type"))
-                        }
+                let mut len_obj = dict.lookup(b"Length").unwrap_or(&Object::Null);
+                let resolved;
+                if let Object::Ref(oref) = len_obj {
+                    resolved = parser.find_obj(&oref, &xref)?;
+                    len_obj = &resolved;
+                }
+                match *len_obj {
+                    Object::Number(Number::Int(len)) => {
+                        let data = parser.read_stream_data(offset, Some(len))?;
+                        println!("{offset} + {} bytes (exact)", data.len());
                     },
-                    _ => return Err(Error::Parse("Length of wrong type"))
-                };
-                let data = parser.read_stream_data(offset, Some(len))?;
-                println!("{offset} + {} bytes (exact)", data.len());
+                    Object::Null => {
+                        let data = parser.read_stream_data(offset, None)?;
+                        println!("{offset} + {} bytes (incl. EOF)", data.len());
+                    },
+                    _ => return Err(Error::Parse("Length object of wrong type"))
+                }
             }
         },
         _ => todo!()

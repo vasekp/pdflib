@@ -371,6 +371,24 @@ impl<T: ByteProvider> Parser<T> {
         }
         Ok(data)
     }
+
+    pub fn find_obj(&mut self, oref: &ObjRef, xref: &XRefTable) -> Result<Object, Error> {
+        let &ObjRef(onum, ogen) = oref;
+        let Some(rec) = xref.table.get(&onum) else {
+            return Ok(Object::Null);
+        };
+        match *rec {
+            Record::Used{gen, offset} => {
+                if gen != ogen {
+                    Ok(Object::Null)
+                } else {
+                    self.read_obj_at(offset, &oref)
+                }
+            },
+            Record::Compr{..} => unimplemented!(),
+            _ => Ok(Object::Null)
+        }
+    }
 }
 
 impl<T: Into<String>> From<T> for Parser<Cursor<String>> {
