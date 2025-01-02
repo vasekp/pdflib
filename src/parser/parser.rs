@@ -144,25 +144,23 @@ impl<T: ByteProvider> Parser<T> {
     fn read_hex_string(&mut self) -> Result<Object, Error> {
         let mut msd = None;
         let mut ret = Vec::new();
-        let bytes = self.tkn.bytes();
         loop {
-            let c = bytes.next_or_eof()?;
-            let dig = match c {
-                b'0'..=b'9' => c - b'0',
-                b'a'..=b'f' => c - b'a' + 10,
-                b'A'..=b'F' => c - b'A' + 10,
-                b'>' => {
-                    if let Some(d) = msd { ret.push(d << 4); }
-                    break;
-                },
-                d if CharClass::of(d) == CharClass::Space => continue,
-                _ => return Err(Error::Parse("Malformed hex string"))
-            };
-            match msd {
-                None => msd = Some(dig),
-                Some(d) => { ret.push((d << 4) | dig); msd = None; }
+            let tk = self.tkn.next()?;
+            if tk == b">" { break; }
+            for c in tk {
+                let dig = match c {
+                    b'0'..=b'9' => c - b'0',
+                    b'a'..=b'f' => c - b'a' + 10,
+                    b'A'..=b'F' => c - b'A' + 10,
+                    _ => return Err(Error::Parse("Malformed hex string"))
+                };
+                match msd {
+                    None => msd = Some(dig),
+                    Some(d) => { ret.push((d << 4) | dig); msd = None; }
+                }
             }
         }
+        if let Some(d) = msd { ret.push(d << 4); }
         Ok(Object::String(ret))
     }
 
@@ -555,8 +553,9 @@ are the same.) (These two strings are the same.)");
         assert_eq!(parser.read_obj().unwrap(), Object::String(vec![0x90, 0x1F, 0xA3]));
         assert_eq!(parser.read_obj().unwrap(), Object::String(vec![0x90, 0x1F, 0xA0]));
 
-        let mut parser = Parser::from("<61\r\n62> <61%comment\n>");
+        let mut parser = Parser::from("<61\r\n6 2> <61%comment\n> <61%unterminated>");
         assert_eq!(parser.read_obj().unwrap(), Object::new_string("ab"));
+        assert_eq!(parser.read_obj().unwrap(), Object::new_string("a"));
         assert!(parser.read_obj().is_err());
     }
 
