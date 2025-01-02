@@ -1,7 +1,7 @@
 use pdflib::parser::Parser;
 use pdflib::base::*;
 
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read};
 use std::fs::File;
 
 fn main() -> Result<(), pdflib::base::Error> {
@@ -42,9 +42,14 @@ fn main() -> Result<(), pdflib::base::Error> {
         let mut deflater = ZlibDecoder::new(&data_raw[..]);
         let mut data_dec = Vec::new();
         deflater.read_to_end(&mut data_dec)?;
-        println!();
-        std::io::stdout().write_all(&data_dec)?;
-        println!("\n({} bytes read)", deflater.total_out());
+        println!("-----");
+        for c in data_dec {
+            match c {
+                0x20..=0x7E | b'\n' => print!("{}", c as char),
+                _ => print!("\x1B[7m<{:02x}>\x1B[0m", c)
+            }
+        }
+        println!("\n-----\n({} bytes read)", deflater.total_out());
     }
     Ok(())
 }
