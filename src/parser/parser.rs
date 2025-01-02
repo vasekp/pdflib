@@ -309,7 +309,11 @@ impl<T: ByteProvider> Parser<T> {
             Object::Dict(dict) => dict,
             _ => return Err(Error::Parse("malformed trailer"))
         };
-        Ok(XRef{table, trailer, tpe: XRefType::Table})
+        let Some(&Object::Number(Number::Int(size))) = trailer.lookup(b"Size") else {
+            return Err(Error::Parse("malformed trailer (missing /Size)"))
+        };
+        let size = size.try_into().map_err(|_| Error::Parse("malformed trailer (/Size)"))?;
+        Ok(XRef{table, size, trailer, tpe: XRefType::Table})
     }
 
     fn read_xref_stream(&mut self) -> Result<XRef, Error> {
@@ -386,7 +390,7 @@ impl<T: ByteProvider> Parser<T> {
         if deflater.fill_buf()?.len() != 0 {
             return Err(Error::Parse("malfomed xref stream"));
         }
-        Ok(XRef{table, trailer: dict, tpe: XRefType::Stream(oref)})
+        Ok(XRef{table, size, trailer: dict, tpe: XRefType::Stream(oref)})
     }
 
     fn read_xref_inner(&mut self) -> Result<XRef, Error> {
@@ -449,7 +453,9 @@ impl<T: ByteProvider> Parser<T> {
     }
 
     pub fn find_obj(&mut self, oref: &ObjRef, xref: &XRef) -> Result<Object, Error> {
-        // TODO: /Size
+        if oref.num >= xref.size {
+            return Ok(Object::Null);
+        }
         let Some(rec) = xref.table.get(&oref.num) else {
             return Ok(Object::Null);
         };
