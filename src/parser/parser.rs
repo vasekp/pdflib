@@ -30,10 +30,10 @@ impl<T: ByteProvider> Parser<T> {
             b"true" => Ok(Object::Bool(true)),
             b"false" => Ok(Object::Bool(false)),
             b"null" => Ok(Object::Null),
-            [b'0'..=b'9', ..] => {
+            [b'1'..=b'9', ..] => {
                 self.tkn.unread(first);
                 self.read_number_or_indirect() },
-            [b'+' | b'-' | b'.', ..] => {
+            [b'+' | b'-' | b'0' | b'.', ..] => {
                 self.tkn.unread(first);
                 self.read_number().map(Object::Number) },
             b"(" => self.read_lit_string(),
@@ -59,17 +59,21 @@ impl<T: ByteProvider> Parser<T> {
         };
         assert!(num >= 0);
         let gen_tk = self.tkn.next()?;
-        match Self::to_number_inner(&gen_tk) {
-            Ok(Number::Int(gen)) if gen <= u16::MAX as i64 => {
-                let r_tk = self.tkn.next()?;
-                if r_tk == b"R" {
-                    return Ok(Object::Ref(ObjRef{num: num as u64, gen: gen as u16}));
-                } else {
-                    self.tkn.unread(r_tk);
-                    self.tkn.unread(gen_tk);
-                }
-            },
-            _ => self.tkn.unread(gen_tk)
+        if matches!(&gen_tk[..], [b'0'] | [b'1'..b'9', ..]) {
+            match Self::parse::<u16>(&gen_tk) {
+                Ok(gen) => {
+                    let r_tk = self.tkn.next()?;
+                    if r_tk == b"R" {
+                        return Ok(Object::Ref(ObjRef{num: num as u64, gen}));
+                    } else {
+                        self.tkn.unread(r_tk);
+                        self.tkn.unread(gen_tk);
+                    }
+                },
+                _ => self.tkn.unread(gen_tk)
+            }
+        } else {
+            self.tkn.unread(gen_tk)
         }
         Ok(Object::Number(Number::Int(num)))
     }
@@ -478,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_read_obj() {
-        let mut parser = Parser::from("true false null 123 +17 -98 0 34.5 -3.62 +123.6 4. -.002 0.0");
+        let mut parser = Parser::from("true false null 123 +17 -98 0 00987 34.5 -3.62 +123.6 4. -.002 0.0 009.87");
         assert_eq!(parser.read_obj().unwrap(), Object::Bool(true));
         assert_eq!(parser.read_obj().unwrap(), Object::Bool(false));
         assert_eq!(parser.read_obj().unwrap(), Object::Null);
@@ -486,12 +490,14 @@ mod tests {
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(17)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(-98)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(0)));
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(987)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(34.5)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(-3.62)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(123.6)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(4.)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(-0.002)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(0.)));
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(9.87)));
 
         let mut parser = Parser::from("++1 1..0 .1. 1_ 1a 16#FFFE . 6.023E23 true");
         assert!(parser.read_obj().is_err());
@@ -634,6 +640,26 @@ are the same.) (These two strings are the same.)");
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
         assert_eq!(parser.read_obj().unwrap(), Object::Ref(ObjRef{num: 2, gen: 3}));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(4)));
+        assert!(parser.read_obj().is_err());
+
+        let mut parser = Parser::from("0 0 R");
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(0)));
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(0)));
+        assert!(parser.read_obj().is_err());
+
+        let mut parser = Parser::from("01 0 R");
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(0)));
+        assert!(parser.read_obj().is_err());
+
+        let mut parser = Parser::from("1 01 R");
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
+        assert!(parser.read_obj().is_err());
+
+        let mut parser = Parser::from("1 +1 R");
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
         assert!(parser.read_obj().is_err());
     }
 }
