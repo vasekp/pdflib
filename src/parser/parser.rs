@@ -310,17 +310,90 @@ impl<T: ByteProvider> Parser<T> {
         Ok(XRef{table, trailer, tpe: XRefType::Table})
     }
 
+    fn read_xref_stream(&mut self) -> Result<XRef, Error> {
+        let (oref, obj) = self.read_obj_indirect()?;
+        let Object::Stream(Stream{dict, data: Data::Ref(offset)}) = obj else {
+            return Err(Error::Parse("malfomed xref"))
+        };
+        if dict.lookup(b"Type") != Some(&Object::new_name("XRef")) {
+            return Err(Error::Parse("malfomed xref stream (/Type)"))
+        }
+        let Some(&Object::Number(Number::Int(size))) = dict.lookup(b"Size") else {
+            return Err(Error::Parse("malfomed xref stream (/Size)"))
+        };
+        if size <= 0 {
+            return Err(Error::Parse("malfomed xref stream (/Size)"))
+        }
+        let size = size as u64;
+        let index = match dict.lookup(b"Index") {
+            Some(Object::Array(arr)) =>
+                arr.iter()
+                    .map(|obj| match obj {
+                        &Object::Number(Number::Int(num)) if num >= 0 => Ok(num as u64),
+                        _ => Err(Error::Parse("malfomed xref stream (/Index)"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            None => vec![0, size],
+            _ => return Err(Error::Parse("malfomed xref stream (/Index)"))
+        };
+        let w = match dict.lookup(b"W") {
+            Some(Object::Array(arr)) =>
+                arr.iter()
+                    .map(|obj| match obj {
+                        &Object::Number(Number::Int(num)) if num >= 0 && num < 8 => Ok(num as usize),
+                        _ => Err(Error::Parse("malfomed xref stream (/W)"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            _ => return Err(Error::Parse("malfomed xref stream (/W)"))
+        };
+        let [w1, w2, w3] = w[..] else {
+            return Err(Error::Parse("malfomed xref stream (/W)"))
+        };
+        if w2 == 0 {
+            return Err(Error::Parse("malfomed xref stream (/W)"))
+        }
+        let Some(&Object::Number(Number::Int(len))) = dict.lookup(b"Length") else {
+            return Err(Error::Parse("malfomed xref stream (/Length)"))
+        };
+        let mut table = std::collections::BTreeMap::new();
+        assert_eq!(dict.lookup(b"Filter"), Some(&Object::new_name("FlateDecode"))); // TODO
+        let data_raw = self.read_stream_data(offset, Some(len))?;
+        use flate2::bufread::ZlibDecoder;
+        use std::io::{Read, BufRead, BufReader};
+        let mut deflater = BufReader::new(ZlibDecoder::new(&data_raw[..]));
+        let mut read = |w| -> Result<u64, Error> {
+            let mut dec_buf = [0; 8];
+            deflater.read_exact(&mut dec_buf[(8-w)..8])?;
+            Ok(u64::from_be_bytes(dec_buf))
+        };
+        // TODO: use array_chunks() when stabilized
+        for ch in index.chunks_exact(2) {
+            let &[start, len] = ch else { unreachable!() };
+            for num in start..(start + len) {
+                let tpe = if w1 > 0 { read(w1)? } else { 1 };
+                let f2 = read(w2)?;
+                let f3 = read(w3)?.try_into().expect("Generation field larger than 16 bits.");
+                match tpe {
+                    0 => table.insert(num, Record::Free{gen: f3, next: f2}),
+                    1 => table.insert(num, Record::Used{gen: f3, offset: f2}),
+                    2 => table.insert(num, Record::Compr{num: f2, index: f3}),
+                    _ => unimplemented!()
+                };
+            }
+        }
+        if deflater.fill_buf()?.len() != 0 {
+            return Err(Error::Parse("malfomed xref stream"));
+        }
+        Ok(XRef{table, trailer: dict, tpe: XRefType::Stream(oref)})
+    }
+
     fn read_xref_inner(&mut self) -> Result<XRef, Error> {
         let tk = self.tkn.next()?;
         if tk == b"xref" {
             Ok(self.read_xref_table()?)
         } else {
             self.tkn.unread(tk);
-            let (oref, obj) = self.read_obj_indirect()?;
-            let Object::Stream(stm) = obj else {
-                return Err(Error::Parse("malfomed xref"))
-            };
-            todo!()
+            Ok(self.read_xref_stream()?)
         }
     }
 
@@ -374,6 +447,7 @@ impl<T: ByteProvider> Parser<T> {
     }
 
     pub fn find_obj(&mut self, oref: &ObjRef, xref: &XRef) -> Result<Object, Error> {
+        // TODO: /Size
         let Some(rec) = xref.table.get(&oref.num) else {
             return Ok(Object::Null);
         };
