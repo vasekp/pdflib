@@ -503,6 +503,10 @@ mod tests {
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(0.)));
         assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(9.87)));
 
+        let mut parser = Parser::from("9223372036854775807 9223372036854775808");
+        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(9223372036854775807)));
+        assert!(parser.read_obj().is_err());
+
         let mut parser = Parser::from("++1 1..0 .1. 1_ 1a 16#FFFE . 6.023E23 true");
         assert!(parser.read_obj().is_err());
         assert!(parser.read_obj().is_err());
