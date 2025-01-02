@@ -5,7 +5,7 @@ use std::io::{BufReader, Read};
 use std::fs::File;
 
 fn main() -> Result<(), pdflib::base::Error> {
-    let fname = std::env::args().skip(1).next().unwrap_or("tests/test1-short.pdf".into());
+    let fname = std::env::args().nth(1).unwrap_or("tests/test1-short.pdf".into());
     println!("{fname}");
     let f = File::open(fname)?;
     let mut parser = Parser::new(BufReader::new(f));

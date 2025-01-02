@@ -346,7 +346,7 @@ impl<T: ByteProvider> Parser<T> {
             Some(Object::Array(arr)) =>
                 arr.iter()
                     .map(|obj| match obj {
-                        &Object::Number(Number::Int(num)) if num >= 0 && num < 8 => Ok(num as usize),
+                        &Object::Number(Number::Int(num)) if (0..8).contains(&num) => Ok(num as usize),
                         _ => Err(Error::Parse("malfomed xref stream (/W)"))
                     })
                     .collect::<Result<Vec<_>, _>>()?,
@@ -387,7 +387,7 @@ impl<T: ByteProvider> Parser<T> {
                 };
             }
         }
-        if deflater.fill_buf()?.len() != 0 {
+        if !deflater.fill_buf()?.is_empty() {
             return Err(Error::Parse("malfomed xref stream"));
         }
         Ok(XRef{table, size, trailer: dict, tpe: XRefType::Stream(oref)})
