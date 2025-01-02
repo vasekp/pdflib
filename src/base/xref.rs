@@ -1,13 +1,14 @@
 use super::*;
 
-pub enum XRef {
-    Table(XRefTable),
-    Stream(ObjRef, Stream)
+pub struct XRef {
+    pub table: std::collections::BTreeMap<u64, Record>,
+    pub trailer: Dict,
+    pub tpe: XRefType
 }
 
-pub struct XRefTable {
-    pub table: std::collections::BTreeMap<u64, Record>,
-    pub trailer: Dict
+pub enum XRefType {
+    Table,
+    Stream(ObjRef)
 }
 
 pub enum Record {

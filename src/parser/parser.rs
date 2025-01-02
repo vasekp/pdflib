@@ -276,7 +276,7 @@ impl<T: ByteProvider> Parser<T> {
         }
     }
 
-    fn read_xref_table(&mut self) -> Result<XRefTable, Error> {
+    fn read_xref_table(&mut self) -> Result<XRef, Error> {
         let bytes = self.tkn.bytes();
         bytes.skip_past_eol()?;
         let mut table = std::collections::BTreeMap::new();
@@ -307,20 +307,20 @@ impl<T: ByteProvider> Parser<T> {
             Object::Dict(dict) => dict,
             _ => return Err(Error::Parse("malformed trailer"))
         };
-        Ok(XRefTable{table, trailer})
+        Ok(XRef{table, trailer, tpe: XRefType::Table})
     }
 
     fn read_xref_inner(&mut self) -> Result<XRef, Error> {
         let tk = self.tkn.next()?;
         if tk == b"xref" {
-            Ok(XRef::Table(self.read_xref_table()?))
+            Ok(self.read_xref_table()?)
         } else {
             self.tkn.unread(tk);
             let (oref, obj) = self.read_obj_indirect()?;
             let Object::Stream(stm) = obj else {
                 return Err(Error::Parse("malfomed xref"))
             };
-            Ok(XRef::Stream(oref, stm))
+            todo!()
         }
     }
 
@@ -373,7 +373,7 @@ impl<T: ByteProvider> Parser<T> {
         Ok(data)
     }
 
-    pub fn find_obj(&mut self, oref: &ObjRef, xref: &XRefTable) -> Result<Object, Error> {
+    pub fn find_obj(&mut self, oref: &ObjRef, xref: &XRef) -> Result<Object, Error> {
         let Some(rec) = xref.table.get(&oref.num) else {
             return Ok(Object::Null);
         };
