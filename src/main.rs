@@ -29,7 +29,7 @@ fn main() -> Result<(), pdflib::base::Error> {
         println!("{} {}: {}", oref.num, oref.gen, obj);
         let Object::Stream(stm) = obj else { continue };
         let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
-        let len_obj = dict.lookup(b"Length").unwrap_or(&Object::Null);
+        let len_obj = dict.lookup(b"Length");
         let data_raw = match *len_obj {
             Object::Number(Number::Int(len)) => {
                 let data = parser.read_stream_data(offset, Some(len))?;
@@ -42,8 +42,7 @@ fn main() -> Result<(), pdflib::base::Error> {
                 data
             },
         };
-        let mut deflater = codecs::decode(Cursor::new(data_raw),
-            dict.lookup(b"Filter").unwrap_or(&Object::Null));
+        let mut deflater = codecs::decode(Cursor::new(data_raw), dict.lookup(b"Filter"));
         let mut data_dec = Vec::new();
         deflater.read_to_end(&mut data_dec)?;
         println!("-----");

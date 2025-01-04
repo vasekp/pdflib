@@ -289,7 +289,7 @@ impl<T: ByteProvider> Parser<T> {
             let (oref, Object::Stream(Stream{dict, data: Data::Ref(offset)})) = self.read_obj_indirect()?
                 else { return Err(Error::Parse("malformed xref")) };
             assert!(self.tkn.pos()? == offset);
-            if dict.lookup(b"Type") != Some(&Object::new_name("XRef")) {
+            if dict.lookup(b"Type") != &Object::new_name("XRef") {
                 return Err(Error::Parse("malfomed xref stream (/Type)"))
             }
             Ok((XRefType::Stream(oref), Box::new(ReadXRefStream::new(self, dict)?)))
@@ -472,7 +472,7 @@ struct ReadXRefStream<'a, T: ByteProvider> {
 
 impl<'a, T: ByteProvider> ReadXRefStream<'a, T> {
     fn new(parser: &'a mut Parser<T>, dict: Dict) -> Result<Self, Error> {
-        let Some(&Object::Number(Number::Int(size))) = dict.lookup(b"Size") else {
+        let &Object::Number(Number::Int(size)) = dict.lookup(b"Size") else {
             return Err(Error::Parse("malfomed xref stream (/Size)"))
         };
         if size <= 0 {
@@ -480,14 +480,14 @@ impl<'a, T: ByteProvider> ReadXRefStream<'a, T> {
         }
         let size = size as u64;
         let index = match dict.lookup(b"Index") {
-            Some(Object::Array(arr)) =>
+            Object::Array(arr) =>
                 arr.iter()
                     .map(|obj| match obj {
                         &Object::Number(Number::Int(num)) if num >= 0 => Ok(num as u64),
                         _ => Err(Error::Parse("malfomed xref stream (/Index)"))
                     })
                     .collect::<Result<Vec<_>, _>>()?,
-            None => vec![0, size],
+            Object::Null => vec![0, size],
             _ => return Err(Error::Parse("malfomed xref stream (/Index)"))
         };
         let mut iter = index.into_iter();
@@ -497,7 +497,7 @@ impl<'a, T: ByteProvider> ReadXRefStream<'a, T> {
         };
 
         let widths : [_; 3] = match dict.lookup(b"W") {
-            Some(Object::Array(arr)) =>
+            Object::Array(arr) =>
                 arr.iter()
                     .map(|obj| match obj {
                         &Object::Number(Number::Int(num)) if (0..8).contains(&num) => Ok(num as usize),
@@ -510,14 +510,13 @@ impl<'a, T: ByteProvider> ReadXRefStream<'a, T> {
             return Err(Error::Parse("malfomed xref stream (/W)"))
         }
 
-        let Some(&Object::Number(Number::Int(len))) = dict.lookup(b"Length") else {
+        let &Object::Number(Number::Int(len)) = dict.lookup(b"Length") else {
             return Err(Error::Parse("malfomed xref stream (/Length)"))
         };
         let mut data_raw = vec![0; len as usize];
         parser.tkn.bytes().read_exact(&mut data_raw)?;
 
-        let deflater = crate::codecs::decode(Cursor::new(data_raw),
-            dict.lookup(b"Filter").unwrap_or(&Object::Null));
+        let deflater = crate::codecs::decode(Cursor::new(data_raw), dict.lookup(b"Filter"));
         Ok(Self {
             parser, dict,
             index_iter: iter, widths,

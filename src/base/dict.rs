@@ -7,10 +7,11 @@ use super::object::Object;
 pub struct Dict(pub Vec<(Name, Object)>);
 
 impl Dict {
-    pub fn lookup(&self, key: &[u8]) -> Option<&Object> {
+    pub fn lookup(&self, key: &[u8]) -> &Object {
         self.0.iter()
             .find(|(name, _obj)| name == &key)
             .map(|(_name, obj)| obj)
+            .unwrap_or(&Object::Null)
     }
 }
 
