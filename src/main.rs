@@ -10,32 +10,36 @@ fn main() -> Result<(), pdflib::base::Error> {
     let f = File::open(fname)?;
     let mut parser = Parser::new(BufReader::new(f));
     let entry = parser.entrypoint()?;
-    let xref = parser.read_xref_at(entry)?;
-    println!("{}", xref.trailer);
-    for (&num, rec) in &xref.table {
-        let &Record::Used{gen, offset} = rec else { continue };
-        let obj = parser.read_obj_at(offset, &ObjRef{num, gen})?;
-        println!("{num} {gen}: {}", obj);
+
+    let (tpe, mut iter) = parser.read_xref_at(entry)?;
+    println!("xref at {entry} ({})", match tpe {
+        XRefType::Table => "table",
+        XRefType::Stream(_) => "stream"
+    });
+    let mut recs = Vec::new();
+    for res in &mut iter {
+        let (num, rec) = res?;
+        let Record::Used{gen, offset} = rec else { continue };
+        recs.push((ObjRef{num, gen}, offset));
+    }
+    println!("{}", iter.trailer()?);
+    for (oref, offset) in recs {
+        let obj = parser.read_obj_at(offset, &oref)?;
+        println!("{} {}: {}", oref.num, oref.gen, obj);
         let Object::Stream(stm) = obj else { continue };
         let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
-        let mut len_obj = dict.lookup(b"Length").unwrap_or(&Object::Null);
-        let resolved;
-        if let Object::Ref(oref) = len_obj {
-            resolved = parser.find_obj(oref, &xref)?;
-            len_obj = &resolved;
-        }
+        let len_obj = dict.lookup(b"Length").unwrap_or(&Object::Null);
         let data_raw = match *len_obj {
             Object::Number(Number::Int(len)) => {
                 let data = parser.read_stream_data(offset, Some(len))?;
                 println!("{offset} + {} bytes (exact)", data.len());
                 data
             },
-            Object::Null => {
+            _ => {
                 let data = parser.read_stream_data(offset, None)?;
-                println!("{offset} + {} bytes (incl. EOF)", data.len());
+                println!("{offset} + {} bytes (incl. EOL)", data.len());
                 data
             },
-            _ => return Err(Error::Parse("Length object of wrong type"))
         };
         assert_eq!(dict.lookup(b"Filter"), Some(&Object::new_name("FlateDecode")));
         use flate2::bufread::ZlibDecoder;
