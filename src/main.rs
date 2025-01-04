@@ -1,7 +1,8 @@
 use pdflib::parser::Parser;
 use pdflib::base::*;
+use pdflib::codecs;
 
-use std::io::{BufReader, Read};
+use std::io::{BufReader, Read, Cursor};
 use std::fs::File;
 
 fn main() -> Result<(), pdflib::base::Error> {
@@ -41,9 +42,8 @@ fn main() -> Result<(), pdflib::base::Error> {
                 data
             },
         };
-        assert_eq!(dict.lookup(b"Filter"), Some(&Object::new_name("FlateDecode")));
-        use flate2::bufread::ZlibDecoder;
-        let mut deflater = ZlibDecoder::new(&data_raw[..]);
+        let mut deflater = codecs::decode(Cursor::new(data_raw),
+            dict.lookup(b"Filter").unwrap_or(&Object::Null));
         let mut data_dec = Vec::new();
         deflater.read_to_end(&mut data_dec)?;
         println!("-----");
@@ -53,7 +53,7 @@ fn main() -> Result<(), pdflib::base::Error> {
                 _ => print!("\x1B[7m<{:02x}>\x1B[0m", c)
             }
         }
-        println!("\n-----\n({} bytes read)", deflater.total_out());
+        println!("\n-----\n");
     }
     Ok(())
 }

@@ -516,9 +516,8 @@ impl<'a, T: ByteProvider> ReadXRefStream<'a, T> {
         let mut data_raw = vec![0; len as usize];
         parser.tkn.bytes().read_exact(&mut data_raw)?;
 
-        assert_eq!(dict.lookup(b"Filter"), Some(&Object::new_name("FlateDecode"))); // TODO
-        use flate2::bufread::ZlibDecoder;
-        let deflater = std::io::BufReader::new(ZlibDecoder::new(Cursor::new(data_raw)));
+        let deflater = crate::codecs::decode(Cursor::new(data_raw),
+            dict.lookup(b"Filter").unwrap_or(&Object::Null));
         Ok(Self {
             parser, dict,
             index_iter: iter, widths,

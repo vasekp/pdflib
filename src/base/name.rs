@@ -30,8 +30,8 @@ impl Debug for Name {
     }
 }
 
-impl PartialEq<&[u8]> for Name {
-    fn eq(&self, other: &&[u8]) -> bool {
-        self.0 == *other
+impl<T: AsRef<[u8]>> PartialEq<T> for Name {
+    fn eq(&self, other: &T) -> bool {
+        self.0 == other.as_ref()
     }
 }
