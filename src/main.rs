@@ -2,7 +2,7 @@ use pdflib::parser::Parser;
 use pdflib::base::*;
 use pdflib::codecs;
 
-use std::io::{BufReader, Read, Cursor};
+use std::io::{BufReader, Read};
 use std::fs::File;
 
 fn main() -> Result<(), pdflib::base::Error> {
@@ -29,7 +29,7 @@ fn main() -> Result<(), pdflib::base::Error> {
         println!("{} {}: {}", oref.num, oref.gen, obj);
         let Object::Stream(stm) = obj else { continue };
         let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
-        let len_obj = dict.lookup(b"Length");
+        /*let len_obj = dict.lookup(b"Length");
         let data_raw = match *len_obj {
             Object::Number(Number::Int(len)) => {
                 let data = parser.read_stream_data(offset, Some(len))?;
@@ -41,12 +41,11 @@ fn main() -> Result<(), pdflib::base::Error> {
                 println!("{offset} + {} bytes (incl. EOL)", data.len());
                 data
             },
-        };
-        let mut deflater = codecs::decode(Cursor::new(data_raw), dict.lookup(b"Filter"));
-        let mut data_dec = Vec::new();
-        deflater.read_to_end(&mut data_dec)?;
+        };*/
+        let data = BufReader::new(codecs::decode(parser.read_raw(offset)?, dict.lookup(b"Filter")));
         println!("-----");
-        for c in data_dec {
+        for c in data.bytes() {
+            let c = c?;
             match c {
                 0x20..=0x7E | b'\n' => print!("{}", c as char),
                 _ => print!("\x1B[7m<{:02x}>\x1B[0m", c)

@@ -286,13 +286,8 @@ impl<T: ByteProvider> Parser<T> {
             Ok((XRefType::Table, Box::new(ReadXRefTable::new(self)?)))
         } else {
             self.tkn.unread(tk);
-            let (oref, Object::Stream(Stream{dict, data: Data::Ref(offset)})) = self.read_obj_indirect()?
-                else { return Err(Error::Parse("malformed xref")) };
-            assert!(self.tkn.pos()? == offset);
-            if dict.lookup(b"Type") != &Object::new_name("XRef") {
-                return Err(Error::Parse("malfomed xref stream (/Type)"))
-            }
-            Ok((XRefType::Stream(oref), Box::new(ReadXRefStream::new(self, dict)?)))
+            let (oref, obj) = self.read_obj_indirect()?;
+            Ok((XRefType::Stream(oref), Box::new(ReadXRefStream::new(self, obj)?)))
         }
     }
 
@@ -305,60 +300,10 @@ impl<T: ByteProvider> Parser<T> {
         Ok(obj)
     }
 
-    pub fn read_stream_data(&mut self, start: u64, len: Option<i64>) -> Result<Vec<u8>, Error> {
+    pub fn read_raw(&mut self, start: u64) -> Result<impl Read + use<'_, T>, Error> {
         self.seek_to(start)?;
-        let data = match len {
-            Some(len) => {
-                if len <= 0 { return Err(Error::Parse("invalid length")); }
-                let mut data = vec![0; len as usize];
-                self.tkn.bytes().read_exact(&mut data)?;
-                data
-            },
-            None => {
-                let mut data = Vec::new();
-                let bytes = self.tkn.bytes();
-                loop {
-                    let off = bytes.stream_position()?;
-                    let line = bytes.read_line_incl()?;
-                    if let Some(pos) = line.windows(9).position(|w| w == b"endstream") {
-                        data.extend_from_slice(&line[0..pos]);
-                        bytes.seek(std::io::SeekFrom::Start(off + (pos as u64)))?;
-                        break;
-                    } else {
-                        data.extend_from_slice(&line[..]);
-                    }
-                }
-                data
-            }
-        };
-        if self.tkn.next()? != b"endstream" {
-            return Err(Error::Parse("endstream not found"));
-        }
-        if self.tkn.next()? != b"endobj" {
-            return Err(Error::Parse("endobj missing"));
-        }
-        Ok(data)
+        Ok(self.tkn.bytes())
     }
-
-    /*pub fn find_obj(&mut self, oref: &ObjRef, xref: &XRef) -> Result<Object, Error> {
-        if oref.num >= xref.size {
-            return Ok(Object::Null);
-        }
-        let Some(rec) = xref.table.get(&oref.num) else {
-            return Ok(Object::Null);
-        };
-        match *rec {
-            Record::Used{gen, offset} => {
-                if gen != oref.gen {
-                    Ok(Object::Null)
-                } else {
-                    self.read_obj_at(offset, oref)
-                }
-            },
-            Record::Compr{..} => unimplemented!(),
-            _ => Ok(Object::Null)
-        }
-    }*/
 }
 
 impl<T: Into<String>> From<T> for Parser<Cursor<String>> {
@@ -459,19 +404,23 @@ impl<T: ByteProvider> XRefRead for ReadXRefTable<'_, T> {
 }
 
 
-struct ReadXRefStream<'a, T: ByteProvider> {
-    parser: &'a mut Parser<T>,
+struct ReadXRefStream<'a> {
     dict: Dict,
+    reader: Box<dyn Read + 'a>,
     // FIXME: use iter_array_chunks when stabilized
     index_iter: <Vec<u64> as IntoIterator>::IntoIter,
     widths: [usize; 3],
-    reader: Box<dyn Read>,
     num: u64,
     ceil: u64
 }
 
-impl<'a, T: ByteProvider> ReadXRefStream<'a, T> {
-    fn new(parser: &'a mut Parser<T>, dict: Dict) -> Result<Self, Error> {
+impl<'a> ReadXRefStream<'a> {
+    fn new<T: ByteProvider>(parser: &'a mut Parser<T>, obj: Object) -> Result<Self, Error> {
+        let Object::Stream(Stream{dict, data: Data::Ref(offset)}) = obj
+            else { return Err(Error::Parse("malformed xref")) };
+        if dict.lookup(b"Type") != &Object::new_name("XRef") {
+            return Err(Error::Parse("malfomed xref stream (/Type)"))
+        }
         let &Object::Number(Number::Int(size)) = dict.lookup(b"Size") else {
             return Err(Error::Parse("malfomed xref stream (/Size)"))
         };
@@ -513,14 +462,11 @@ impl<'a, T: ByteProvider> ReadXRefStream<'a, T> {
         let &Object::Number(Number::Int(len)) = dict.lookup(b"Length") else {
             return Err(Error::Parse("malfomed xref stream (/Length)"))
         };
-        let mut data_raw = vec![0; len as usize];
-        parser.tkn.bytes().read_exact(&mut data_raw)?;
-
-        let deflater = crate::codecs::decode(Cursor::new(data_raw), dict.lookup(b"Filter"));
+        let raw_reader = parser.read_raw(offset)?.take(len as u64);
+        let reader = crate::codecs::decode(raw_reader, dict.lookup(b"Filter"));
         Ok(Self {
-            parser, dict,
+            dict, reader,
             index_iter: iter, widths,
-            reader: Box::new(deflater),
             num: start, ceil: start + size
         })
     }
@@ -546,7 +492,7 @@ impl<'a, T: ByteProvider> ReadXRefStream<'a, T> {
     }
 }
 
-impl<T: ByteProvider> Iterator for ReadXRefStream<'_, T> {
+impl Iterator for ReadXRefStream<'_> {
     type Item = Result<(u64, Record), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -568,13 +514,13 @@ impl<T: ByteProvider> Iterator for ReadXRefStream<'_, T> {
         }
     }
 
-    /*Check after end?
+    /*FIXME Check after end?
        if !deflater.fill_buf()?.is_empty() {
         return Err(Error::Parse("malfomed xref stream"));
     }*/
 }
 
-impl<T: ByteProvider> XRefRead for ReadXRefStream<'_, T> {
+impl XRefRead for ReadXRefStream<'_> {
     fn trailer(self: Box<Self>) -> Result<Dict, Error> {
         Ok(self.dict)
     }
