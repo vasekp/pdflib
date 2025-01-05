@@ -1,6 +1,6 @@
-use std::io::{BufRead, Seek};
+use std::io::BufRead;
 
-pub trait ByteProvider: BufRead + Seek {
+pub trait ByteProvider: BufRead {
     fn peek(&mut self) -> Option<u8> {
         match self.fill_buf() {
             Ok(buf) => Some(buf[0]),
@@ -107,7 +107,7 @@ pub trait ByteProvider: BufRead + Seek {
     }
 }
 
-impl<T: BufRead + Seek> ByteProvider for T { }
+impl<T: BufRead> ByteProvider for T { }
 
 
 #[cfg(test)]

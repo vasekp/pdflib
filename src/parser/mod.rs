@@ -1,6 +1,6 @@
 mod bp;
 pub mod cc;
-mod tk;
+pub(crate) mod tk;
 #[allow(clippy::module_inception)]
 mod parser;
 

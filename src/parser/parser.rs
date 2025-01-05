@@ -1,4 +1,4 @@
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Seek, Read};
 
 use crate::base::*;
 
@@ -14,11 +14,11 @@ fn parse<U: std::str::FromStr>(bstr: &[u8]) -> Result<U, Error> {
 }
 
 
-pub struct Parser<T: ByteProvider> {
+pub struct Parser<T: ByteProvider + Seek> {
     tkn: Tokenizer<T>
 }
 
-impl<T: ByteProvider> Parser<T> {
+impl<T: ByteProvider + Seek> Parser<T> {
     pub fn new(reader: T) -> Self {
         Self { tkn: Tokenizer::new(reader) }
     }
@@ -318,13 +318,13 @@ pub trait XRefRead : Iterator<Item = Result<(u64, Record), Error>> {
 }
 
 
-struct ReadXRefTable<'a, T: ByteProvider> {
+struct ReadXRefTable<'a, T: ByteProvider + Seek> {
     parser: &'a mut Parser<T>,
     num: u64,
     ceil: u64
 }
 
-impl<'a, T: ByteProvider> ReadXRefTable<'a, T> {
+impl<'a, T: ByteProvider + Seek> ReadXRefTable<'a, T> {
     fn new(parser: &'a mut Parser<T>) -> Result<Self, Error> {
         let bytes = parser.tkn.bytes();
         let line = bytes.read_line_excl()?.trim_ascii_end().to_owned();
@@ -356,7 +356,7 @@ impl<'a, T: ByteProvider> ReadXRefTable<'a, T> {
     }
 }
 
-impl<T: ByteProvider> Iterator for ReadXRefTable<'_, T> {
+impl<T: ByteProvider + Seek> Iterator for ReadXRefTable<'_, T> {
     type Item = Result<(u64, Record), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -385,7 +385,7 @@ impl<T: ByteProvider> Iterator for ReadXRefTable<'_, T> {
     }
 }
 
-impl<T: ByteProvider> XRefRead for ReadXRefTable<'_, T> {
+impl<T: ByteProvider + Seek> XRefRead for ReadXRefTable<'_, T> {
     fn trailer(mut self: Box<Self>) -> Result<Dict, Error> {
         while self.num < self.ceil {
             let bytes = self.parser.tkn.bytes();
@@ -415,7 +415,7 @@ struct ReadXRefStream<'a> {
 }
 
 impl<'a> ReadXRefStream<'a> {
-    fn new<T: ByteProvider>(parser: &'a mut Parser<T>, obj: Object) -> Result<Self, Error> {
+    fn new<T: ByteProvider + Seek>(parser: &'a mut Parser<T>, obj: Object) -> Result<Self, Error> {
         let Object::Stream(Stream{dict, data: Data::Ref(offset)}) = obj
             else { return Err(Error::Parse("malformed xref")) };
         if dict.lookup(b"Type") != &Object::new_name("XRef") {

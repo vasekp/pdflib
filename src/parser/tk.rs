@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{Seek, Cursor};
 use super::bp::ByteProvider;
 use super::cc::CharClass;
 
@@ -65,7 +65,9 @@ impl<T: ByteProvider> Tokenizer<T> {
         assert!(self.stack.is_empty());
         &mut self.bytes
     }
+}
 
+impl<T: ByteProvider + Seek> Tokenizer<T> {
     pub fn seek_to(&mut self, pos: u64) -> std::io::Result<()> {
         self.stack.clear();
         self.bytes.seek(std::io::SeekFrom::Start(pos)).map(|_| ())
