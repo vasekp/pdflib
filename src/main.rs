@@ -29,20 +29,18 @@ fn main() -> Result<(), pdflib::base::Error> {
         println!("{} {}: {}", oref.num, oref.gen, obj);
         let Object::Stream(stm) = obj else { continue };
         let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
-        /*let len_obj = dict.lookup(b"Length");
-        let data_raw = match *len_obj {
+        let len_obj = dict.lookup(b"Length");
+        let data_raw: Box<dyn Read> = match *len_obj {
             Object::Number(Number::Int(len)) => {
-                let data = parser.read_stream_data(offset, Some(len))?;
-                println!("{offset} + {} bytes (exact)", data.len());
-                data
+                println!("{offset} + {} bytes (exact)", len);
+                Box::new(parser.read_raw(offset)?.take(len as u64))
             },
             _ => {
-                let data = parser.read_stream_data(offset, None)?;
-                println!("{offset} + {} bytes (incl. EOL)", data.len());
-                data
+                println!("{offset} + unknown length"); // TODO: endstream
+                Box::new(parser.read_raw(offset)?)
             },
-        };*/
-        let data = BufReader::new(codecs::decode(parser.read_raw(offset)?, dict.lookup(b"Filter")));
+        };
+        let data = BufReader::new(codecs::decode(data_raw, dict.lookup(b"Filter")));
         println!("-----");
         for c in data.bytes() {
             let c = c?;
