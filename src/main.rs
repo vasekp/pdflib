@@ -1,4 +1,5 @@
 use pdflib::parser::Parser;
+use pdflib::reader::Reader;
 use pdflib::base::*;
 use pdflib::codecs;
 
@@ -7,7 +8,9 @@ use std::fs::File;
 
 fn main() -> Result<(), pdflib::base::Error> {
     let fname = std::env::args().nth(1).unwrap_or("tests/test1-short.pdf".into());
-    println!("{fname}");
+
+    let _rdr = Reader::new(BufReader::new(File::open(fname.clone())?));
+
     let f = File::open(fname)?;
     let mut parser = Parser::new(BufReader::new(f));
     let entry = parser.entrypoint()?;
@@ -51,5 +54,6 @@ fn main() -> Result<(), pdflib::base::Error> {
         }
         println!("\n-----\n");
     }
+
     Ok(())
 }
