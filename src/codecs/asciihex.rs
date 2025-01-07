@@ -1,5 +1,6 @@
 use std::io::*;
 use crate::parser::tk::Tokenizer;
+use crate::utils;
 
 pub fn decode<R: Read>(input: R) -> AsciiHexDecoder<BufReader<R>> {
     AsciiHexDecoder::new(input)
@@ -40,21 +41,13 @@ impl<R: BufRead> AsciiHexDecoder<R> {
         }
     }
 
-    fn hex_value(c: u8) -> std::io::Result<u8> {
-        match c {
-            b'0'..=b'9' => Ok(c - b'0'),
-            b'a'..=b'f' => Ok(c - b'a' + 10),
-            b'A'..=b'F' => Ok(c - b'A' + 10),
-            _ => Err(Error::from(ErrorKind::InvalidData))
-        }
-    }
-
     fn next_out(&mut self) -> std::io::Result<Option<u8>> {
         let msd = match self.next_in()? {
-            Some(msd) => Self::hex_value(msd)?,
+            Some(msd) => utils::hex_value(msd).ok_or(Error::from(ErrorKind::InvalidData))?,
             None => return Ok(None),
         };
-        let lsd = Self::hex_value(self.next_in()?.unwrap_or(b'0'))?;
+        let lsd = utils::hex_value(self.next_in()?.unwrap_or(b'0'))
+            .ok_or(Error::from(ErrorKind::InvalidData))?;
         Ok(Some((msd << 4) | lsd))
     }
 }
