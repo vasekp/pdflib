@@ -49,11 +49,11 @@ impl<T: BufRead + Seek> Reader<T> {
         };
         let mut map = BTreeMap::new();
         while let Some(Ok((num, rec))) = iter.next() {
-            if map.contains_key(&num) {
-                eprintln!("Duplicate number in xref @ {offset}: {num}"); // FIXME store duplicates somewhere
-            } else {
-                map.insert(num, rec);
-            }
+            match map.entry(num) {
+                Entry::Vacant(entry) => { entry.insert(rec); },
+                Entry::Occupied(_) =>
+                    eprintln!("Duplicate number in xref @ {offset}: {num}") // FIXME store duplicates somewhere
+            };
         }
         let trailer = iter.trailer();
         let (size, prev, xrefstm) = match &trailer {
@@ -74,7 +74,8 @@ impl<T: BufRead + Seek> Reader<T> {
             Err(_) => (None, None, None)
         };
         let xref = XRef { tpe, map, trailer, size, prev: [xrefstm, prev] };
-        let xref = entry.insert(Ok(xref)).as_ref().unwrap();
-        xref.prev.into_iter().flatten().for_each(|offset| self.add_xref(offset));
+        entry.insert(Ok(xref));
+        [xrefstm, prev].into_iter().flatten()
+            .for_each(|offset| self.add_xref(offset));
     }
 }
