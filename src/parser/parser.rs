@@ -41,8 +41,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
             b"/" => self.read_name().map(Object::Name),
             b"[" => self.read_array(),
             b"<<" => self.read_dict(),
-            b"R" => Err(Error::Parse("unexcepted token: R")),
-            _ => todo!("{:?}", std::str::from_utf8(&first))
+            _ => Err(Error::Parse("unexcepted token")),
         }
     }
 
@@ -226,9 +225,9 @@ impl<T: ByteProvider + Seek> Parser<T> {
     }
 
     fn read_obj_indirect(&mut self) -> Result<(ObjRef, Object), Error> {
-        let Number::Int(num) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
+        let Ok(Number::Int(num)) = self.read_number() else { return Err(Error::Parse("unexpected token")) };
         let num = num.try_into().map_err(|_| Error::Parse("invalid object number"))?;
-        let Number::Int(gen) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
+        let Ok(Number::Int(gen)) = self.read_number() else { return Err(Error::Parse("unexpected token")) };
         let gen = gen.try_into().map_err(|_| Error::Parse("invalid generation number"))?;
         let oref = ObjRef{num, gen};
         if self.tkn.next()? != b"obj" {
