@@ -41,19 +41,19 @@ impl<T: ByteProvider + Seek> Parser<T> {
             b"/" => self.read_name().map(Object::Name),
             b"[" => self.read_array(),
             b"<<" => self.read_dict(),
-            b"R" => Err(Error::Parse("Unexcepted token: R")),
+            b"R" => Err(Error::Parse("unexcepted token: R")),
             _ => todo!("{:?}", std::str::from_utf8(&first))
         }
     }
 
     fn read_number(&mut self) -> Result<Number, Error> {
         Self::to_number_inner(&self.tkn.next()?)
-            .map_err(|_| Error::Parse("Malformed number"))
+            .map_err(|_| Error::Parse("malformed number"))
     }
 
     fn read_number_or_indirect(&mut self) -> Result<Object, Error> {
         let num = Self::to_number_inner(&self.tkn.next()?)
-            .map_err(|_| Error::Parse("Malformed number"))?;
+            .map_err(|_| Error::Parse("malformed number"))?;
         let Number::Int(num) = num else {
             return Ok(Object::Number(num))
         };
@@ -166,13 +166,13 @@ impl<T: ByteProvider + Seek> Parser<T> {
         let mut ret: Vec<u8> = parts.next().unwrap().into(); // nonemptiness checked in contains()
         for part in parts {
             if part.len() < 2 {
-                return Err(Error::Parse("Malformed name"));
+                return Err(Error::Parse("malformed name"));
             }
             if &part[0..=1] == b"00" {
-                return Err(Error::Parse("Illegal name (contains #00)"));
+                return Err(Error::Parse("illegal name (contains #00)"));
             }
-            let d1 = utils::hex_value(part[0]).ok_or(Error::Parse("Malformed name"))?;
-            let d2 = utils::hex_value(part[1]).ok_or(Error::Parse("Malformed name"))?;
+            let d1 = utils::hex_value(part[0]).ok_or(Error::Parse("malformed name"))?;
+            let d2 = utils::hex_value(part[1]).ok_or(Error::Parse("malformed name"))?;
             ret.push((d1 << 4) + d2);
             ret.extend_from_slice(&part[2..]);
         }
@@ -196,7 +196,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
             let key = match &self.tkn.next()?[..] {
                 b">>" => break,
                 b"/" => self.read_name()?,
-                _ => return Err(Error::Parse("Malformed dictionary"))
+                _ => return Err(Error::Parse("malformed dictionary"))
             };
             let value = self.read_obj()?;
             dict.push((key, value));
