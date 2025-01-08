@@ -1,18 +1,11 @@
 use std::io::{Cursor, Seek, Read};
 
 use crate::base::*;
+use crate::utils;
 
 use super::bp::ByteProvider;
 use super::cc::CharClass;
 use super::tk::{Token, Tokenizer};
-
-fn parse<U: std::str::FromStr>(bstr: &[u8]) -> Result<U, Error> {
-    std::str::from_utf8(bstr)
-        .map_err(|_| Error::Parse("parse error"))?
-        .parse::<U>()
-        .map_err(|_| Error::Parse("parse error"))
-}
-
 
 pub struct Parser<T: ByteProvider + Seek> {
     tkn: Tokenizer<T>
@@ -48,27 +41,26 @@ impl<T: ByteProvider + Seek> Parser<T> {
             b"/" => self.read_name().map(Object::Name),
             b"[" => self.read_array(),
             b"<<" => self.read_dict(),
-            b"R" => Err(Error::Parse("Unexcepted token: R")),
-            _ => todo!("{:?}", std::str::from_utf8(&first))
+            _ => Err(Error::Parse("unexcepted token")),
         }
     }
 
     fn read_number(&mut self) -> Result<Number, Error> {
         Self::to_number_inner(&self.tkn.next()?)
-            .map_err(|_| Error::Parse("Malformed number"))
+            .map_err(|_| Error::Parse("malformed number"))
     }
 
     fn read_number_or_indirect(&mut self) -> Result<Object, Error> {
         let num = Self::to_number_inner(&self.tkn.next()?)
-            .map_err(|_| Error::Parse("Malformed number"))?;
+            .map_err(|_| Error::Parse("malformed number"))?;
         let Number::Int(num) = num else {
             return Ok(Object::Number(num))
         };
         assert!(num >= 0);
         let gen_tk = self.tkn.next()?;
         if matches!(&gen_tk[..], [b'0'] | [b'1'..b'9', ..]) {
-            match parse::<u16>(&gen_tk) {
-                Ok(gen) => {
+            match utils::parse_num(&gen_tk) {
+                Some(gen) => {
                     let r_tk = self.tkn.next()?;
                     if r_tk == b"R" {
                         return Ok(Object::Ref(ObjRef{num: num as u64, gen}));
@@ -77,7 +69,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
                         self.tkn.unread(gen_tk);
                     }
                 },
-                _ => self.tkn.unread(gen_tk)
+                None => self.tkn.unread(gen_tk)
             }
         } else {
             self.tkn.unread(gen_tk)
@@ -87,12 +79,12 @@ impl<T: ByteProvider + Seek> Parser<T> {
 
     fn to_number_inner(tok: &Token) -> Result<Number, Error> {
         if tok.contains(&b'e') || tok.contains(&b'E') {
-            return Err(Error::Parse("parse error"))
+            return Err(Error::Parse("malformed number"))
         }
         if tok.contains(&b'.') {
-            Ok(Number::Real(parse::<f64>(tok)?))
+            Ok(Number::Real(utils::parse_num(tok).ok_or(Error::Parse("malformed number"))?))
         } else {
-            Ok(Number::Int(parse::<i64>(tok)?))
+            Ok(Number::Int(utils::parse_num(tok).ok_or(Error::Parse("malformed number"))?))
         }
     }
 
@@ -148,12 +140,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
             let tk = self.tkn.next()?;
             if tk == b">" { break; }
             for c in tk {
-                let dig = match c {
-                    b'0'..=b'9' => c - b'0',
-                    b'a'..=b'f' => c - b'a' + 10,
-                    b'A'..=b'F' => c - b'A' + 10,
-                    _ => return Err(Error::Parse("Malformed hex string"))
-                };
+                let dig = utils::hex_value(c).ok_or(Error::Parse("malformed hex string"))?;
                 match msd {
                     None => msd = Some(dig),
                     Some(d) => { ret.push((d << 4) | dig); msd = None; }
@@ -176,21 +163,15 @@ impl<T: ByteProvider + Seek> Parser<T> {
         }
         let mut parts = tk.split(|c| *c == b'#');
         let mut ret: Vec<u8> = parts.next().unwrap().into(); // nonemptiness checked in contains()
-        let hex = |c| match c {
-            b'0'..=b'9' => Ok(c - b'0'),
-            b'a'..=b'f' => Ok(c - b'a' + 10),
-            b'A'..=b'F' => Ok(c - b'A' + 10),
-            _ => Err(Error::Parse("Malformed name"))
-        };
         for part in parts {
             if part.len() < 2 {
-                return Err(Error::Parse("Malformed name"));
+                return Err(Error::Parse("malformed name"));
             }
             if &part[0..=1] == b"00" {
-                return Err(Error::Parse("Illegal name (contains #00)"));
+                return Err(Error::Parse("illegal name (contains #00)"));
             }
-            let d1 = hex(part[0])?;
-            let d2 = hex(part[1])?;
+            let d1 = utils::hex_value(part[0]).ok_or(Error::Parse("malformed name"))?;
+            let d2 = utils::hex_value(part[1]).ok_or(Error::Parse("malformed name"))?;
             ret.push((d1 << 4) + d2);
             ret.extend_from_slice(&part[2..]);
         }
@@ -214,7 +195,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
             let key = match &self.tkn.next()?[..] {
                 b">>" => break,
                 b"/" => self.read_name()?,
-                _ => return Err(Error::Parse("Malformed dictionary"))
+                _ => return Err(Error::Parse("malformed dictionary"))
             };
             let value = self.read_obj()?;
             dict.push((key, value));
@@ -239,15 +220,14 @@ impl<T: ByteProvider + Seek> Parser<T> {
             .ok_or(Error::Parse("startxref not found"))?;
         let mut cur = Cursor::new(&data[sxref..]);
         cur.skip_past_eol()?;
-        let sxref = parse::<u64>(&cur.read_line_excl()?)
-            .map_err(|_| Error::Parse("malformed startxref"))?;
+        let sxref = utils::parse_num(&cur.read_line_excl()?).ok_or(Error::Parse("malformed startxref"))?;
         Ok(sxref)
     }
 
     fn read_obj_indirect(&mut self) -> Result<(ObjRef, Object), Error> {
-        let Number::Int(num) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
+        let Ok(Number::Int(num)) = self.read_number() else { return Err(Error::Parse("unexpected token")) };
         let num = num.try_into().map_err(|_| Error::Parse("invalid object number"))?;
-        let Number::Int(gen) = self.read_number()? else { return Err(Error::Parse("unexpected token")) };
+        let Ok(Number::Int(gen)) = self.read_number() else { return Err(Error::Parse("unexpected token")) };
         let gen = gen.try_into().map_err(|_| Error::Parse("invalid generation number"))?;
         let oref = ObjRef{num, gen};
         if self.tkn.next()? != b"obj" {
@@ -339,8 +319,8 @@ impl<'a, T: ByteProvider + Seek> ReadXRefTable<'a, T> {
         if line[10] != b' ' || line[16] != b' ' {
             return Err(());
         }
-        let v = parse::<u64>(&line[0..10]).map_err(|_| ())?;
-        let gen = parse::<u16>(&line[11..16]).map_err(|_| ())?;
+        let v = utils::parse_num(&line[0..10]).ok_or(())?;
+        let gen = utils::parse_num(&line[11..16]).ok_or(())?;
         match line[17] {
             b'n' => Ok(Record::Used{gen, offset: v}),
             b'f' => Ok(Record::Free{gen, next: v}),
@@ -350,8 +330,8 @@ impl<'a, T: ByteProvider + Seek> ReadXRefTable<'a, T> {
 
     fn read_section(line: &[u8]) -> Result<(u64, u64), ()> {
         let index = line.iter().position(|c| *c == b' ').ok_or(())?;
-        let start = parse::<u64>(&line[..index]).map_err(|_| ())?;
-        let size = parse::<u64>(&line[(index+1)..]).map_err(|_| ())?;
+        let start = utils::parse_num(&line[..index]).ok_or(())?;
+        let size = utils::parse_num(&line[(index+1)..]).ok_or(())?;
         Ok((start, size))
     }
 }
