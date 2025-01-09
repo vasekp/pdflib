@@ -242,6 +242,17 @@ impl<T: ByteProvider + Seek> Parser<T> {
                 let Object::Dict(dict) = obj else {
                     return Err(Error::Parse("endobj not found"))
                 };
+                let bytes = self.tkn.bytes();
+                match bytes.next_or_eof()? {
+                    b'\n' => (),
+                    b'\r' => {
+                        if bytes.next_or_eof()? != b'\n' {
+                            return Err(Error::Parse("stream keyword not followed by proper EOL"));
+                        }
+                    },
+                    _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
+                };
+                let offset = bytes.stream_position()?;
                 let len = self.resolve(dict.lookup(b"Length"), locator)
                     .ok().as_ref().and_then(Object::num_value);
                 let filters = match self.resolve(dict.lookup(b"Filter"), locator).ok() {
@@ -255,19 +266,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
                         .unwrap_or(vec![]),
                     _ => vec![]
                 };
-                let bytes = self.tkn.bytes();
-                match bytes.next_or_eof()? {
-                    b'\n' => (),
-                    b'\r' => {
-                        if bytes.next_or_eof()? != b'\n' {
-                            return Err(Error::Parse("stream keyword not followed by proper EOL"));
-                        }
-                    },
-                    _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
-                };
-                let stm = Stream { dict, data: Data::Ref(IndirectData {
-                    offset: bytes.stream_position()?, len, filters
-                }) };
+                let stm = Stream { dict, data: Data::Ref(IndirectData { offset, len, filters }) };
                 Ok((oref, Object::Stream(stm)))
             },
             _ => Err(Error::Parse("endobj not found"))
