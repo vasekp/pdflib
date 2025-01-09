@@ -9,7 +9,11 @@ use std::fs::File;
 fn main() -> Result<(), pdflib::base::Error> {
     let fname = std::env::args().nth(1).unwrap_or("tests/test1-short.pdf".into());
 
-    let _rdr = Reader::new(BufReader::new(File::open(fname.clone())?));
+    let mut rdr = Reader::new(BufReader::new(File::open(fname.clone())?));
+    for (oref, res) in rdr.objects() {
+        println!("{oref}: {}", res?);
+    }
+    println!();
 
     let f = File::open(fname)?;
     let mut parser = Parser::new(BufReader::new(f));

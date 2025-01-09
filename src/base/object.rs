@@ -67,6 +67,12 @@ pub struct ObjRef {
     pub gen: ObjGen
 }
 
+impl Display for ObjRef {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.num, self.gen)
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
