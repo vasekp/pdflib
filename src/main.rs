@@ -34,7 +34,7 @@ fn main() -> Result<(), pdflib::base::Error> {
         let Stream{dict, data: Data::Ref(offset)} = stm else { panic!() };
         let len_obj = dict.lookup(b"Length");
         let data_raw: Box<dyn Read> = match *len_obj {
-            Object::Number(Number::Int(len)) => {
+            Object::Number(Number::Int(len)) if len > 0 => {
                 println!("{offset} + {} bytes (exact)", len);
                 Box::new(parser.read_raw(offset)?.take(len as u64))
             },

@@ -3,21 +3,22 @@ use std::collections::BTreeMap;
 use std::collections::btree_map::Entry;
 
 use crate::base::*;
+use crate::base::types::*;
 use crate::parser::Parser;
 
 pub struct Reader<T: BufRead + Seek> {
     parser: Parser<T>,
-    xrefs: BTreeMap<u64, Result<XRef, Error>>,
-    entry: Result<u64, Error>
+    xrefs: BTreeMap<Offset, Result<XRef, Error>>,
+    entry: Result<Offset, Error>
 }
 
 #[derive(Debug)]
 struct XRef {
     tpe: XRefType,
-    map: BTreeMap<u64, Record>,
+    map: BTreeMap<ObjNum, Record>,
     trailer: Result<Dict, Error>,
-    size: Option<u64>,
-    prev: [Option<u64>; 2]
+    size: Option<ObjNum>,
+    prev: [Option<Offset>; 2]
 }
 
 impl<T: BufRead + Seek> Reader<T> {
@@ -35,7 +36,7 @@ impl<T: BufRead + Seek> Reader<T> {
         reader
     }
 
-    fn add_xref(&mut self, offset: u64) {
+    fn add_xref(&mut self, offset: Offset) {
         let entry = match self.xrefs.entry(offset) {
             Entry::Vacant(entry) => entry,
             Entry::Occupied(_) => return
@@ -58,18 +59,9 @@ impl<T: BufRead + Seek> Reader<T> {
         let trailer = iter.trailer();
         let (size, prev, xrefstm) = match &trailer {
             Ok(dict) => (
-                match dict.lookup(b"Size") {
-                    &Object::Number(Number::Int(size)) if size > 0 => Some(size as u64),
-                    _ => None
-                },
-                match dict.lookup(b"Prev") {
-                    &Object::Number(Number::Int(offset)) if offset > 0 => Some(offset as u64),
-                    _ => None
-                },
-                match (&tpe, dict.lookup(b"XRefStm")) {
-                    (&XRefType::Table, &Object::Number(Number::Int(offset))) if offset > 0 => Some(offset as u64),
-                    _ => None
-                }
+                dict.lookup(b"Size").num_value(),
+                dict.lookup(b"Prev").num_value(),
+                dict.lookup(b"XRefStm").num_value()
             ),
             Err(_) => (None, None, None)
         };

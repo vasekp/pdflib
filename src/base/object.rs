@@ -5,6 +5,7 @@ use super::dict::Dict;
 use super::number::Number;
 use super::string::format_string;
 use super::stream::Stream;
+use super::types::*;
 
 #[derive(Debug, PartialEq)]
 pub enum Object {
@@ -26,6 +27,13 @@ impl Object {
 
     pub fn new_name(s: &str) -> Object {
         Object::Name(Name::from(s))
+    }
+
+    pub fn num_value<T: TryFrom<i64>>(&self) -> Option<T> {
+        match self {
+            &Object::Number(Number::Int(num)) => num.try_into().ok(),
+            _ => None
+        }
     }
 }
 
@@ -55,8 +63,8 @@ impl Display for Object {
 
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub struct ObjRef {
-    pub num: u64,
-    pub gen: u16
+    pub num: ObjNum,
+    pub gen: ObjGen
 }
 
 

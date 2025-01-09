@@ -1,6 +1,7 @@
 use std::io::{Cursor, Seek, Read};
 
 use crate::base::*;
+use crate::base::types::*;
 use crate::utils;
 
 use super::bp::ByteProvider;
@@ -16,11 +17,11 @@ impl<T: ByteProvider + Seek> Parser<T> {
         Self { tkn: Tokenizer::new(reader) }
     }
 
-    pub fn seek_to(&mut self, pos: u64) -> std::io::Result<()> {
+    pub fn seek_to(&mut self, pos: Offset) -> std::io::Result<()> {
         self.tkn.seek_to(pos)
     }
 
-    pub fn pos(&mut self) -> std::io::Result<u64> {
+    pub fn pos(&mut self) -> std::io::Result<Offset> {
         self.tkn.pos()
     }
 
@@ -56,14 +57,14 @@ impl<T: ByteProvider + Seek> Parser<T> {
         let Number::Int(num) = num else {
             return Ok(Object::Number(num))
         };
-        assert!(num >= 0);
         let gen_tk = self.tkn.next()?;
         if matches!(&gen_tk[..], [b'0'] | [b'1'..b'9', ..]) {
             match utils::parse_num(&gen_tk) {
                 Some(gen) => {
                     let r_tk = self.tkn.next()?;
                     if r_tk == b"R" {
-                        return Ok(Object::Ref(ObjRef{num: num as u64, gen}));
+                        let num = num.try_into().unwrap(); // num already checked to start with 1..=9 and i64 fits
+                        return Ok(Object::Ref(ObjRef{num, gen}));
                     } else {
                         self.tkn.unread(r_tk);
                         self.tkn.unread(gen_tk);
@@ -203,7 +204,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
         Ok(Object::Dict(Dict(dict)))
     }
 
-    pub fn entrypoint(&mut self) -> Result<u64, Error> {
+    pub fn entrypoint(&mut self) -> Result<Offset, Error> {
         let bytes = self.tkn.bytes();
         let len = bytes.seek(std::io::SeekFrom::End(0))?;
         let buf_size = std::cmp::min(len, 1024);
@@ -258,7 +259,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
         }
     }
 
-    pub fn read_xref_at(&mut self, start: u64) -> Result<(XRefType, Box<dyn XRefRead + '_>), Error> {
+    pub fn read_xref_at(&mut self, start: Offset) -> Result<(XRefType, Box<dyn XRefRead + '_>), Error> {
         self.seek_to(start)?;
         let tk = self.tkn.next()?;
         if tk == b"xref" {
@@ -271,7 +272,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
         }
     }
 
-    pub fn read_obj_at(&mut self, start: u64, oref_exp: &ObjRef) -> Result<Object, Error> {
+    pub fn read_obj_at(&mut self, start: Offset, oref_exp: &ObjRef) -> Result<Object, Error> {
         self.seek_to(start)?;
         let (oref, obj) = self.read_obj_indirect()?;
         if oref != *oref_exp {
@@ -280,7 +281,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
         Ok(obj)
     }
 
-    pub fn read_raw(&mut self, start: u64) -> Result<impl Read + use<'_, T>, Error> {
+    pub fn read_raw(&mut self, start: Offset) -> Result<impl Read + use<'_, T>, Error> {
         self.seek_to(start)?;
         Ok(self.tkn.bytes())
     }
@@ -293,15 +294,15 @@ impl<T: Into<String>> From<T> for Parser<Cursor<String>> {
 }
 
 
-pub trait XRefRead : Iterator<Item = Result<(u64, Record), Error>> {
+pub trait XRefRead : Iterator<Item = Result<(ObjNum, Record), Error>> {
     fn trailer(self: Box<Self>) -> Result<Dict, Error>;
 }
 
 
 struct ReadXRefTable<'a, T: ByteProvider + Seek> {
     parser: &'a mut Parser<T>,
-    num: u64,
-    ceil: u64
+    num: ObjNum,
+    ceil: ObjNum
 }
 
 impl<'a, T: ByteProvider + Seek> ReadXRefTable<'a, T> {
@@ -328,7 +329,7 @@ impl<'a, T: ByteProvider + Seek> ReadXRefTable<'a, T> {
         }
     }
 
-    fn read_section(line: &[u8]) -> Result<(u64, u64), ()> {
+    fn read_section(line: &[u8]) -> Result<(ObjNum, ObjNum), ()> {
         let index = line.iter().position(|c| *c == b' ').ok_or(())?;
         let start = utils::parse_num(&line[..index]).ok_or(())?;
         let size = utils::parse_num(&line[(index+1)..]).ok_or(())?;
@@ -337,7 +338,7 @@ impl<'a, T: ByteProvider + Seek> ReadXRefTable<'a, T> {
 }
 
 impl<T: ByteProvider + Seek> Iterator for ReadXRefTable<'_, T> {
-    type Item = Result<(u64, Record), Error>;
+    type Item = Result<(ObjNum, Record), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.num == self.ceil {
@@ -369,7 +370,8 @@ impl<T: ByteProvider + Seek> XRefRead for ReadXRefTable<'_, T> {
     fn trailer(mut self: Box<Self>) -> Result<Dict, Error> {
         while self.num < self.ceil {
             let bytes = self.parser.tkn.bytes();
-            bytes.seek(std::io::SeekFrom::Current(20 * ((self.ceil - self.num) as i64)))?;
+            let skip: i64 = (self.ceil - self.num).try_into().map_err(|_| Error::Parse("range too large"))?;
+            bytes.seek(std::io::SeekFrom::Current(20 * skip))?;
             let line = bytes.read_line_excl()?.trim_ascii_end().to_owned();
             if line == b"trailer" { break; }
             let (start, size) = Self::read_section(&line).map_err(|_| Error::Parse("malformed xref table"))?;
@@ -388,10 +390,10 @@ struct ReadXRefStream<'a> {
     dict: Dict,
     reader: Box<dyn Read + 'a>,
     // FIXME: use iter_array_chunks when stabilized
-    index_iter: <Vec<u64> as IntoIterator>::IntoIter,
+    index_iter: <Vec<ObjNum> as IntoIterator>::IntoIter,
     widths: [usize; 3],
-    num: u64,
-    ceil: u64
+    num: ObjNum,
+    ceil: ObjNum
 }
 
 impl<'a> ReadXRefStream<'a> {
@@ -401,20 +403,12 @@ impl<'a> ReadXRefStream<'a> {
         if dict.lookup(b"Type") != &Object::new_name("XRef") {
             return Err(Error::Parse("malfomed xref stream (/Type)"))
         }
-        let &Object::Number(Number::Int(size)) = dict.lookup(b"Size") else {
-            return Err(Error::Parse("malfomed xref stream (/Size)"))
-        };
-        if size <= 0 {
-            return Err(Error::Parse("malfomed xref stream (/Size)"))
-        }
-        let size = size as u64;
+        let size = dict.lookup(b"Size").num_value()
+            .ok_or(Error::Parse("malfomed xref stream (/Size)"))?;
         let index = match dict.lookup(b"Index") {
             Object::Array(arr) =>
                 arr.iter()
-                    .map(|obj| match obj {
-                        &Object::Number(Number::Int(num)) if num >= 0 => Ok(num as u64),
-                        _ => Err(Error::Parse("malfomed xref stream (/Index)"))
-                    })
+                    .map(|obj| obj.num_value().ok_or(Error::Parse("malfomed xref stream (/Index)")))
                     .collect::<Result<Vec<_>, _>>()?,
             Object::Null => vec![0, size],
             _ => return Err(Error::Parse("malfomed xref stream (/Index)"))
@@ -439,10 +433,9 @@ impl<'a> ReadXRefStream<'a> {
             return Err(Error::Parse("malfomed xref stream (/W)"))
         }
 
-        let &Object::Number(Number::Int(len)) = dict.lookup(b"Length") else {
-            return Err(Error::Parse("malfomed xref stream (/Length)"))
-        };
-        let raw_reader = parser.read_raw(offset)?.take(len as u64);
+        let len = dict.lookup(b"Length").num_value()
+            .ok_or(Error::Parse("malfomed xref stream (/Length)"))?;
+        let raw_reader = parser.read_raw(offset)?.take(len);
         let reader = crate::codecs::decode(raw_reader, dict.lookup(b"Filter"));
         Ok(Self {
             dict, reader,
@@ -473,7 +466,7 @@ impl<'a> ReadXRefStream<'a> {
 }
 
 impl Iterator for ReadXRefStream<'_> {
-    type Item = Result<(u64, Record), Error>;
+    type Item = Result<(ObjNum, Record), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.num == self.ceil {

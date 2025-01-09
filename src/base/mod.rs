@@ -1,3 +1,9 @@
+pub mod types {
+    pub type ObjNum = u64;
+    pub type ObjGen = u16;
+    pub type Offset = u64;
+}
+
 mod name;
 pub use name::*;
 

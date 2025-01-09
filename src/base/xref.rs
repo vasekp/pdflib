@@ -1,4 +1,5 @@
 use super::*;
+use super::types::*;
 
 #[derive(Debug)]
 pub enum XRefType {
@@ -8,7 +9,7 @@ pub enum XRefType {
 
 #[derive(Debug)]
 pub enum Record {
-    Used { gen: u16, offset: u64 },
-    Free { gen: u16, next: u64 },
-    Compr { num: u64, index: u16 }
+    Used { gen: ObjGen, offset: Offset },
+    Free { gen: ObjGen, next: ObjNum },
+    Compr { num: ObjNum, index: ObjGen }
 }
