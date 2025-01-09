@@ -22,14 +22,15 @@ struct XRef {
 }
 
 impl Locator for XRef {
-    fn locate(&self, objref: &ObjRef) -> Record {
+    fn locate(&self, objref: &ObjRef) -> Option<Record> {
         if self.size.map(|size| objref.num >= size) == Some(true) {
-            return Record::default();
+            return Some(Record::default());
         }
-        match self.map.get(&objref.num) {
-            Some(rec @ &Record::Used{gen, ..}) if gen == objref.gen => *rec,
-            Some(rec @ &Record::Compr{..}) if objref.gen == 0 => *rec,
-            _ => Record::default()
+        match self.map.get(&objref.num)? {
+            rec @ &Record::Used{gen, ..} if gen == objref.gen => Some(*rec),
+            rec @ &Record::Compr{..} if objref.gen == 0 => Some(*rec),
+            rec @ &Record::Free{..} => Some(*rec),
+            _ => Some(Record::default())
         }
     }
 }

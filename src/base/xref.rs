@@ -21,10 +21,10 @@ impl Default for Record {
 }
 
 pub trait Locator {
-    fn locate(&self, objref: &ObjRef) -> Record;
+    fn locate(&self, objref: &ObjRef) -> Option<Record>;
 
     fn locate_offset(&self, objref: &ObjRef) -> Option<Offset> {
-        if let Record::Used{offset, ..} = self.locate(objref) {
+        if let Some(Record::Used{offset, ..}) = self.locate(objref) {
             Some(offset)
         } else {
             None
@@ -33,7 +33,7 @@ pub trait Locator {
 }
 
 impl Locator for () {
-    fn locate(&self, _objref: &ObjRef) -> Record {
-        Record::default()
+    fn locate(&self, _objref: &ObjRef) -> Option<Record> {
+        None
     }
 }
