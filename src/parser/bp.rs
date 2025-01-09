@@ -78,7 +78,7 @@ pub trait ByteProvider: BufRead {
         self.read_line_inner(false)
     }
 
-    fn read_line_incl(&mut self) -> std::io::Result<Vec<u8>> {
+    fn _read_line_incl(&mut self) -> std::io::Result<Vec<u8>> {
         self.read_line_inner(true)
     }
 

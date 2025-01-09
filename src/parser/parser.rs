@@ -1,4 +1,4 @@
-use std::io::{Cursor, Seek, Read};
+use std::io::{Cursor, Seek, Read, BufRead};
 
 use crate::base::*;
 use crate::base::types::*;
@@ -8,11 +8,11 @@ use super::bp::ByteProvider;
 use super::cc::CharClass;
 use super::tk::{Token, Tokenizer};
 
-pub struct Parser<T: ByteProvider + Seek> {
+pub struct Parser<T: BufRead + Seek> {
     tkn: Tokenizer<T>
 }
 
-impl<T: ByteProvider + Seek> Parser<T> {
+impl<T: BufRead + Seek> Parser<T> {
     pub fn new(reader: T) -> Self {
         Self { tkn: Tokenizer::new(reader) }
     }
