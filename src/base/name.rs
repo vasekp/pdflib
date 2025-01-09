@@ -1,6 +1,6 @@
 use std::fmt::{Display, Debug, Formatter};
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 pub struct Name(pub Vec<u8>);
 
 impl From<&str> for Name {

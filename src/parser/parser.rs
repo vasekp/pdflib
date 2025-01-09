@@ -252,7 +252,21 @@ impl<T: ByteProvider + Seek> Parser<T> {
                     },
                     _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
                 };
-                let stm = Stream { dict, data: Data::Ref(bytes.stream_position()?) };
+                let len = dict.lookup(b"Length").num_value();
+                let filters = match dict.lookup(b"Filter") {
+                    Object::Name(name) => vec![name.clone()],
+                    Object::Array(vec) => vec.iter()
+                        .map(|obj| match obj {
+                            Object::Name(name) => Some(name.clone()),
+                            _ => None
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .unwrap_or(vec![]),
+                    _ => vec![]
+                };
+                let stm = Stream { dict, data: Data::Ref(IndirectData {
+                    offset: bytes.stream_position()?, len, filters
+                }) };
                 Ok((oref, Object::Stream(stm)))
             },
             _ => Err(Error::Parse("endobj not found"))
@@ -398,7 +412,7 @@ struct ReadXRefStream<'a> {
 
 impl<'a> ReadXRefStream<'a> {
     fn new<T: ByteProvider + Seek>(parser: &'a mut Parser<T>, obj: Object) -> Result<Self, Error> {
-        let Object::Stream(Stream{dict, data: Data::Ref(offset)}) = obj
+        let Object::Stream(Stream{dict, data: Data::Ref(ind_data)}) = obj
             else { return Err(Error::Parse("malformed xref")) };
         if dict.lookup(b"Type") != &Object::new_name("XRef") {
             return Err(Error::Parse("malfomed xref stream (/Type)"))
@@ -433,10 +447,11 @@ impl<'a> ReadXRefStream<'a> {
             return Err(Error::Parse("malfomed xref stream (/W)"))
         }
 
-        let len = dict.lookup(b"Length").num_value()
-            .ok_or(Error::Parse("malfomed xref stream (/Length)"))?;
+        let IndirectData{offset, len: Some(len), filters} = ind_data else {
+            return Err(Error::Parse("malfomed xref stream (/Length)"));
+        };
         let raw_reader = parser.read_raw(offset)?.take(len);
-        let reader = crate::codecs::decode(raw_reader, dict.lookup(b"Filter"));
+        let reader = crate::codecs::decode(raw_reader, &filters);
         Ok(Self {
             dict, reader,
             index_iter: iter, widths,

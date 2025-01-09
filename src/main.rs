@@ -19,19 +19,7 @@ fn main() -> Result<(), pdflib::base::Error> {
     let mut parser = Parser::new(BufReader::new(f));
     let entry = parser.entrypoint()?;
 
-    let (tpe, mut iter) = parser.read_xref_at(entry)?;
-    println!("xref at {entry} ({})", match tpe {
-        XRefType::Table => "table",
-        XRefType::Stream(_) => "stream"
-    });
-    let mut recs = Vec::new();
-    for res in &mut iter {
-        let (num, rec) = res?;
-        let Record::Used{gen, offset} = rec else { continue };
-        recs.push((ObjRef{num, gen}, offset));
-    }
-    println!("{}", iter.trailer()?);
-    for (oref, offset) in recs {
+    /*for (oref, offset) in recs {
         let obj = parser.read_obj_at(offset, &oref)?;
         println!("{} {}: {}", oref.num, oref.gen, obj);
         let Object::Stream(stm) = obj else { continue };
@@ -57,7 +45,7 @@ fn main() -> Result<(), pdflib::base::Error> {
             }
         }
         println!("\n-----\n");
-    }
+    }*/
 
     Ok(())
 }
