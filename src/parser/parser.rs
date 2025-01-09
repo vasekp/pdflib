@@ -225,7 +225,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
         Ok(sxref)
     }
 
-    fn read_obj_indirect(&mut self) -> Result<(ObjRef, Object), Error> {
+    fn read_obj_indirect(&mut self, locator: &impl Locator) -> Result<(ObjRef, Object), Error> {
         let Ok(Number::Int(num)) = self.read_number() else { return Err(Error::Parse("unexpected token")) };
         let num = num.try_into().map_err(|_| Error::Parse("invalid object number"))?;
         let Ok(Number::Int(gen)) = self.read_number() else { return Err(Error::Parse("unexpected token")) };
@@ -242,6 +242,19 @@ impl<T: ByteProvider + Seek> Parser<T> {
                 let Object::Dict(dict) = obj else {
                     return Err(Error::Parse("endobj not found"))
                 };
+                let len = self.resolve(dict.lookup(b"Length"), locator)
+                    .ok().as_ref().and_then(Object::num_value);
+                let filters = match self.resolve(dict.lookup(b"Filter"), locator).ok() {
+                    Some(Object::Name(name)) => vec![name],
+                    Some(Object::Array(vec)) => vec.iter()
+                        .map(|obj| match self.resolve(obj, locator).ok() {
+                            Some(Object::Name(name)) => Some(name),
+                            _ => None
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .unwrap_or(vec![]),
+                    _ => vec![]
+                };
                 let bytes = self.tkn.bytes();
                 match bytes.next_or_eof()? {
                     b'\n' => (),
@@ -252,24 +265,28 @@ impl<T: ByteProvider + Seek> Parser<T> {
                     },
                     _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
                 };
-                let len = dict.lookup(b"Length").num_value();
-                let filters = match dict.lookup(b"Filter") {
-                    Object::Name(name) => vec![name.clone()],
-                    Object::Array(vec) => vec.iter()
-                        .map(|obj| match obj {
-                            Object::Name(name) => Some(name.clone()),
-                            _ => None
-                        })
-                        .collect::<Option<Vec<_>>>()
-                        .unwrap_or(vec![]),
-                    _ => vec![]
-                };
                 let stm = Stream { dict, data: Data::Ref(IndirectData {
                     offset: bytes.stream_position()?, len, filters
                 }) };
                 Ok((oref, Object::Stream(stm)))
             },
             _ => Err(Error::Parse("endobj not found"))
+        }
+    }
+
+    fn resolve(&mut self, obj: &Object, locator: &impl Locator) -> Result<Object, Error> {
+        if let Object::Ref(objref) = obj {
+            let Some(offset) = locator.locate_offset(objref) else {
+                return Ok(Object::Null)
+            };
+            let (readref, obj) = self.read_obj_at(offset, locator)?;
+            if &readref == objref {
+                Ok(obj)
+            } else {
+                Err(Error::Parse("object number mismatch"))
+            }
+        } else {
+            Ok(obj.clone())
         }
     }
 
@@ -281,14 +298,14 @@ impl<T: ByteProvider + Seek> Parser<T> {
             Ok((XRefType::Table, Box::new(ReadXRefTable::new(self)?)))
         } else {
             self.tkn.unread(tk);
-            let (oref, obj) = self.read_obj_indirect()?;
+            let (oref, obj) = self.read_obj_indirect(&())?;
             Ok((XRefType::Stream(oref), Box::new(ReadXRefStream::new(self, obj)?)))
         }
     }
 
-    pub fn read_obj_at(&mut self, start: Offset) -> Result<(ObjRef, Object), Error> {
+    pub fn read_obj_at(&mut self, start: Offset, locator: &impl Locator) -> Result<(ObjRef, Object), Error> {
         self.seek_to(start)?;
-        self.read_obj_indirect()
+        self.read_obj_indirect(locator)
     }
 
     pub fn read_raw(&mut self, start: Offset) -> Result<impl Read + use<'_, T>, Error> {

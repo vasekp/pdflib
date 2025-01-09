@@ -7,9 +7,33 @@ pub enum XRefType {
     Stream(ObjRef)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Record {
     Used { gen: ObjGen, offset: Offset },
-    Free { gen: ObjGen, next: ObjNum },
-    Compr { num: ObjNum, index: ObjGen }
+    Compr { num: ObjNum, index: ObjGen },
+    Free { gen: ObjGen, next: ObjNum }
+}
+
+impl Default for Record {
+    fn default() -> Self {
+        Record::Free { gen: 65535, next: 0 }
+    }
+}
+
+pub trait Locator {
+    fn locate(&self, objref: &ObjRef) -> Record;
+
+    fn locate_offset(&self, objref: &ObjRef) -> Option<Offset> {
+        if let Record::Used{offset, ..} = self.locate(objref) {
+            Some(offset)
+        } else {
+            None
+        }
+    }
+}
+
+impl Locator for () {
+    fn locate(&self, _objref: &ObjRef) -> Record {
+        Record::default()
+    }
 }

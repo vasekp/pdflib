@@ -21,6 +21,20 @@ struct XRef {
     prev: [Option<Offset>; 2]
 }
 
+impl Locator for XRef {
+    fn locate(&self, objref: &ObjRef) -> Record {
+        if self.size.map(|size| objref.num >= size) == Some(true) {
+            return Record::default();
+        }
+        match self.map.get(&objref.num) {
+            Some(rec @ &Record::Used{gen, ..}) if gen == objref.gen => *rec,
+            Some(rec @ &Record::Compr{..}) if objref.gen == 0 => *rec,
+            _ => Record::default()
+        }
+    }
+}
+
+
 impl<T: BufRead + Seek> Reader<T> {
     pub fn new(source: T) -> Self {
         let mut parser = Parser::new(source);
@@ -77,10 +91,10 @@ impl<T: BufRead + Seek> Reader<T> {
             .flat_map(|xref| xref.map.iter().map(move |(num, rec)| (num, rec, xref)))
             .filter(|(_, rec, _)| !matches!(rec, Record::Free{..}))
             // all used objects in all xrefs + back-reference to section
-            .map(|(&num, rec, _xref)| match rec {
+            .map(|(&num, rec, xref)| match rec {
                 &Record::Used{gen, offset} => {
                     let objref = ObjRef{num, gen};
-                    (objref, self.parser.read_obj_at(offset))
+                    (objref, self.parser.read_obj_at(offset, xref))
                 },
                 _ => todo!()
             })

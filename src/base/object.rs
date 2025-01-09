@@ -7,7 +7,7 @@ use super::string::format_string;
 use super::stream::Stream;
 use super::types::*;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Object {
     Bool(bool),
     Number(Number),
