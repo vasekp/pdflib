@@ -7,8 +7,12 @@ fn main() -> Result<(), pdflib::base::Error> {
     let fname = std::env::args().nth(1).unwrap_or("tests/test1-short.pdf".into());
 
     let mut rdr = Reader::new(BufReader::new(File::open(fname)?));
-    for (oref, res) in rdr.objects() {
-        println!("{oref}: {}", res?);
+    for (objref, res) in rdr.objects() {
+        match res {
+            Ok((readref, obj)) if readref == objref => println!("{objref}: {obj}"),
+            Ok((readref, obj)) => println!("{objref} / MISMATCH {readref}: {obj}"),
+            Err(err) => println!("{objref}: {err}")
+        }
     }
     println!();
 

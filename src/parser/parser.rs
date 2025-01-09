@@ -286,13 +286,9 @@ impl<T: ByteProvider + Seek> Parser<T> {
         }
     }
 
-    pub fn read_obj_at(&mut self, start: Offset, oref_exp: &ObjRef) -> Result<Object, Error> {
+    pub fn read_obj_at(&mut self, start: Offset) -> Result<(ObjRef, Object), Error> {
         self.seek_to(start)?;
-        let (oref, obj) = self.read_obj_indirect()?;
-        if oref != *oref_exp {
-            return Err(Error::Parse("object number mismatch"));
-        }
-        Ok(obj)
+        self.read_obj_indirect()
     }
 
     pub fn read_raw(&mut self, start: Offset) -> Result<impl Read + use<'_, T>, Error> {
