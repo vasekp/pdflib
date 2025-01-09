@@ -37,8 +37,7 @@ impl Locator for XRef {
 impl Locator for [&XRef] {
     fn locate(&self, objref: &ObjRef) -> Option<Record> {
         self.iter()
-            .map(|xref| xref.locate(objref))
-            .flatten()
+            .flat_map(|xref| xref.locate(objref))
             .next()
     }
 }
@@ -113,18 +112,18 @@ impl<T: BufRead + Seek> Reader<T> {
     }
 
     fn build_xref_list(xrefs: &BTreeMap<Offset, Result<XRef, Error>>, entry: Offset) -> Vec<&XRef> {
-        let mut ret = Vec::new();
+        let mut ret: Vec<&XRef> = Vec::new();
         let mut next = Some(entry);
         while let Some(offset) = next.take() {
             let Some(Ok(xref)) = xrefs.get(&offset) else { break };
-            if ret.iter().any(|&other| other as *const XRef == xref as *const XRef) { break; }
+            if ret.iter().any(|&other| std::ptr::eq(other, xref)) { break; }
             ret.push(xref);
             let Ok(dict) = &xref.trailer else { break };
             'a: {
                 let XRefType::Table = xref.tpe else { break 'a };
                 let Some(xrefstm) = dict.lookup(b"XRefStm").num_value() else { break 'a };
                 let Some(Ok(xref)) = xrefs.get(&xrefstm) else { break 'a };
-                if ret.iter().any(|&other| other as *const XRef == xref as *const XRef) { break 'a; }
+                if ret.iter().any(|&other| std::ptr::eq(other, xref)) { break 'a; }
                 ret.push(xref);
             }
             next = dict.lookup(b"Prev").num_value();
