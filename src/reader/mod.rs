@@ -71,12 +71,12 @@ impl<T: BufRead + Seek> Reader<T> {
             .for_each(|offset| self.add_xref(offset));
     }
 
-    pub fn objects<'a>(&'a mut self) -> impl Iterator<Item = (ObjRef, Result<Object, Error>)> + 'a {
+    pub fn objects(&mut self) -> impl Iterator<Item = (ObjRef, Result<Object, Error>)> + '_ {
         self.xrefs.values() // discards offset
-            .flatten() // all active xrefs
-            .map(|xref| xref.map.iter().map(move |(num, rec)| (num, rec, xref)))
-            .flatten() // all objects in all xrefs + back-reference to section
+            .flatten() // all active xrefs (removes Err entries)
+            .flat_map(|xref| xref.map.iter().map(move |(num, rec)| (num, rec, xref)))
             .filter(|(_, rec, _)| !matches!(rec, Record::Free{..}))
+            // all used objects in all xrefs + back-reference to section
             .map(|(&num, rec, _xref)| match rec {
                 &Record::Used{gen, offset} => {
                     let orec = ObjRef{num, gen};
