@@ -225,7 +225,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
         Ok(sxref)
     }
 
-    fn read_obj_indirect(&mut self, locator: &impl Locator) -> Result<(ObjRef, Object), Error> {
+    fn read_obj_indirect(&mut self, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
         let Ok(Number::Int(num)) = self.read_number() else { return Err(Error::Parse("unexpected token")) };
         let num = num.try_into().map_err(|_| Error::Parse("invalid object number"))?;
         let Ok(Number::Int(gen)) = self.read_number() else { return Err(Error::Parse("unexpected token")) };
@@ -274,7 +274,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
         }
     }
 
-    fn resolve(&mut self, obj: &Object, locator: &impl Locator) -> Result<Object, Error> {
+    fn resolve(&mut self, obj: &Object, locator: &(impl Locator + ?Sized)) -> Result<Object, Error> {
         if let Object::Ref(objref) = obj {
             let Some(offset) = locator.locate_offset(objref) else {
                 return Ok(Object::Null)
@@ -303,7 +303,7 @@ impl<T: ByteProvider + Seek> Parser<T> {
         }
     }
 
-    pub fn read_obj_at(&mut self, start: Offset, locator: &impl Locator) -> Result<(ObjRef, Object), Error> {
+    pub fn read_obj_at(&mut self, start: Offset, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
         self.seek_to(start)?;
         self.read_obj_indirect(locator)
     }
