@@ -4,7 +4,7 @@ use std::io::BufReader;
 use std::fs::File;
 
 fn main() -> Result<(), pdflib::base::Error> {
-    let fname = std::env::args().nth(1).unwrap_or("tests/test1-short.pdf".into());
+    let fname = std::env::args().nth(1).unwrap_or("tests/basic.pdf".into());
 
     let mut rdr = Reader::new(BufReader::new(File::open(fname)?));
     for (objref, res) in rdr.objects() {
