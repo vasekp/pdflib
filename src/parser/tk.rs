@@ -1,4 +1,4 @@
-use std::io::{Seek, Cursor};
+use std::io::Cursor;
 use super::bp::ByteProvider;
 use super::cc::CharClass;
 
@@ -64,18 +64,6 @@ impl<T: ByteProvider> Tokenizer<T> {
     pub fn bytes(&mut self) -> &mut T {
         assert!(self.stack.is_empty());
         &mut self.bytes
-    }
-}
-
-impl<T: ByteProvider + Seek> Tokenizer<T> {
-    pub fn seek_to(&mut self, pos: u64) -> std::io::Result<()> {
-        self.stack.clear();
-        self.bytes.seek(std::io::SeekFrom::Start(pos)).map(|_| ())
-    }
-
-    pub fn pos(&mut self) -> std::io::Result<u64> {
-        assert!(self.stack.is_empty());
-        self.bytes.stream_position()
     }
 }
 

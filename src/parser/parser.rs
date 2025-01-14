@@ -8,21 +8,13 @@ use super::bp::ByteProvider;
 use super::cc::CharClass;
 use super::tk::{Token, Tokenizer};
 
-pub struct Parser<T: BufRead + Seek> {
+pub struct Parser<T: BufRead> {
     tkn: Tokenizer<T>
 }
 
-impl<T: BufRead + Seek> Parser<T> {
+impl<T: BufRead> Parser<T> {
     pub fn new(reader: T) -> Self {
         Self { tkn: Tokenizer::new(reader) }
-    }
-
-    pub fn seek_to(&mut self, pos: Offset) -> std::io::Result<()> {
-        self.tkn.seek_to(pos)
-    }
-
-    pub fn pos(&mut self) -> std::io::Result<Offset> {
-        self.tkn.pos()
     }
 
     pub fn read_obj(&mut self) -> Result<Object, Error> {
@@ -203,6 +195,35 @@ impl<T: BufRead + Seek> Parser<T> {
         }
         Ok(Object::Dict(Dict(dict)))
     }
+}
+
+impl<T: BufRead + Seek> Parser<T> {
+    fn seek_to(&mut self, pos: Offset) -> std::io::Result<u64> {
+        self.tkn.bytes().seek(std::io::SeekFrom::Start(pos))
+    }
+
+    pub fn read_xref_at(&mut self, start: Offset) -> Result<(XRefType, Box<dyn XRefRead + '_>), Error> {
+        self.seek_to(start)?;
+        let tk = self.tkn.next()?;
+        if tk == b"xref" {
+            self.tkn.bytes().skip_past_eol()?;
+            Ok((XRefType::Table, Box::new(ReadXRefTable::new(self)?)))
+        } else {
+            self.tkn.unread(tk);
+            let (oref, obj) = self.read_obj_indirect(&())?;
+            Ok((XRefType::Stream(oref), Box::new(ReadXRefStream::new(self, obj)?)))
+        }
+    }
+
+    pub fn read_obj_at(&mut self, start: Offset, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
+        self.seek_to(start)?;
+        self.read_obj_indirect(locator)
+    }
+
+    pub fn read_raw(&mut self, start: Offset) -> Result<impl Read + use<'_, T>, Error> {
+        self.seek_to(start)?;
+        Ok(self.tkn.bytes())
+    }
 
     pub fn entrypoint(&mut self) -> Result<Offset, Error> {
         let bytes = self.tkn.bytes();
@@ -287,29 +308,6 @@ impl<T: BufRead + Seek> Parser<T> {
         } else {
             Ok(obj.clone())
         }
-    }
-
-    pub fn read_xref_at(&mut self, start: Offset) -> Result<(XRefType, Box<dyn XRefRead + '_>), Error> {
-        self.seek_to(start)?;
-        let tk = self.tkn.next()?;
-        if tk == b"xref" {
-            self.tkn.bytes().skip_past_eol()?;
-            Ok((XRefType::Table, Box::new(ReadXRefTable::new(self)?)))
-        } else {
-            self.tkn.unread(tk);
-            let (oref, obj) = self.read_obj_indirect(&())?;
-            Ok((XRefType::Stream(oref), Box::new(ReadXRefStream::new(self, obj)?)))
-        }
-    }
-
-    pub fn read_obj_at(&mut self, start: Offset, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
-        self.seek_to(start)?;
-        self.read_obj_indirect(locator)
-    }
-
-    pub fn read_raw(&mut self, start: Offset) -> Result<impl Read + use<'_, T>, Error> {
-        self.seek_to(start)?;
-        Ok(self.tkn.bytes())
     }
 }
 
