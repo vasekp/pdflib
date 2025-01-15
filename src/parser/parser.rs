@@ -225,6 +225,72 @@ impl<T: BufRead + Seek> Parser<T> {
         Ok(self.tkn.bytes())
     }
 
+    pub fn find_header(&mut self) -> Result<Header, Error> {
+        const BUF_SIZE: usize = 1024;
+        const HEADER_FIXED: [u8; 5] = *b"%PDF-";
+        const HEADER_FIXED_LEN: usize = HEADER_FIXED.len();
+        const HEADER_FULL_LEN: usize = HEADER_FIXED_LEN + 3;
+        const OVERLAP: usize = HEADER_FULL_LEN - 1;
+
+        let mut data = vec![0u8; HEADER_FULL_LEN];
+        let mut from = 0;
+        let mut to = data.len();
+        use std::ops::ControlFlow;
+        let try_find = |data: &[u8], from: usize| {
+            data.windows(HEADER_FULL_LEN)
+                .enumerate()
+                .filter(|(_, w)| &w[0..HEADER_FIXED_LEN] == &HEADER_FIXED)
+                .try_fold((), |(), (ix, w)| match &w[HEADER_FIXED_LEN..] {
+                    [maj @ b'0'..=b'9', b'.', min @ b'0'..=b'9'] => {
+                        let start = (from + ix).try_into().expect("Should fit into u64.");
+                        let version = (maj - b'0', min - b'0');
+                        ControlFlow::Break(Header { start, version })
+                    },
+                    _ => ControlFlow::Continue(())
+                })
+                .break_value()
+        };
+
+        let bytes = self.tkn.bytes();
+        let file_len = bytes.seek(std::io::SeekFrom::End(0))?
+            .try_into().expect("File length should fit into usize.");
+        bytes.seek(std::io::SeekFrom::Start(0))?;
+
+        bytes.read_exact(&mut data)?;
+        if let Some(header) = try_find(&data, from) {
+            return Ok(header);
+        }
+
+        while to < file_len {
+            let data_len = data.len();
+            data.copy_within((data_len - OVERLAP).., 0);
+            from = to - OVERLAP;
+            to = std::cmp::min(from + BUF_SIZE, file_len);
+            data.resize(to - from, 0u8);
+            bytes.read_exact(&mut data[OVERLAP..])?;
+            if let Some(header) = try_find(&data, from) {
+                return Ok(header);
+            }
+        }
+
+        Err(Error::Parse("header not found"))
+
+        // FIXME: use iter_map_windows when stabilized
+        /*let bytes = self.tkn.bytes();
+        let start = bytes.bytes()
+            .windows(HEADER_FIXED_LEN) // N/A
+            .position(|w| w == &HEADER_FIXED)
+            .ok_or(Error::Parse("header not found"));
+        bytes.seek(std::io::SeekFrom::Start(start))?;
+        let version_string = [0u8; 3];
+        bytes.read_exact(&mut version_string);
+        let version = match &version_string {
+            [maj @ b'0'..=b'9', b'.', min @ b'0'..=b'9'] => Ok((maj - b'0', min - b'0')),
+            _ => Err(Error::Parse("malformed header"))
+        }?;
+        Ok(Header { start, version })*/
+    }
+
     pub fn entrypoint(&mut self) -> Result<Offset, Error> {
         let bytes = self.tkn.bytes();
         let len = bytes.seek(std::io::SeekFrom::End(0))?;
