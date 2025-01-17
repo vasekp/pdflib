@@ -1,7 +1,8 @@
 mod bp;
 pub mod cc;
 pub(crate) mod tk;
-#[allow(clippy::module_inception)]
-mod parser;
+mod op;
+mod fp;
 
-pub use parser::*;
+pub use op::ObjParser;
+pub use fp::FileParser;

@@ -4,10 +4,10 @@ use std::collections::btree_map::Entry;
 
 use crate::base::*;
 use crate::base::types::*;
-use crate::parser::Parser;
+use crate::parser::FileParser;
 
 pub struct Reader<T: BufRead + Seek> {
-    parser: Parser<T>,
+    parser: FileParser<T>,
     xrefs: BTreeMap<Offset, Result<XRef, Error>>,
     entry: Result<Offset, Error>
 }
@@ -44,7 +44,7 @@ impl Locator for [&XRef] {
 
 impl<T: BufRead + Seek> Reader<T> {
     pub fn new(source: T) -> Self {
-        let mut parser = Parser::new(source);
+        let mut parser = FileParser::new(source);
         let xrefs = BTreeMap::new();
         println!("{:?}", parser.find_header());
         let entry = parser.entrypoint();
