@@ -7,7 +7,7 @@ pub fn decode<R: Read>(input: R) -> AsciiHexDecoder<BufReader<R>> {
 }
 
 pub struct AsciiHexDecoder<R: BufRead> {
-    tkn: Tokenizer<R>,
+    reader: R,
     rem: Cursor<Vec<u8>>,
     done: bool
 }
@@ -15,7 +15,7 @@ pub struct AsciiHexDecoder<R: BufRead> {
 impl<R: Read> AsciiHexDecoder<BufReader<R>> {
     fn new(input: R) -> Self {
         AsciiHexDecoder {
-            tkn: Tokenizer::new(BufReader::new(input)),
+            reader: BufReader::new(input),
             rem: Default::default(),
             done: false
         }
@@ -27,7 +27,7 @@ impl<R: BufRead> AsciiHexDecoder<R> {
         if self.done { return Ok(None); }
         let mut buf = [0];
         if self.rem.read(&mut buf)? == 0 {
-            self.rem = match self.tkn.next() {
+            self.rem = match self.reader.read_token_nonempty() {
                 Ok(tk) => Cursor::new(tk),
                 Err(err) if err.kind() == ErrorKind::UnexpectedEof
                     => { self.done = true; return Ok(None); },

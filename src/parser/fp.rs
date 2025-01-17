@@ -6,41 +6,41 @@ use crate::utils;
 
 use super::bp::ByteProvider;
 use super::op::ObjParser;
+use super::tk::{Tokenizer, Token};
 
 pub struct FileParser<T: BufRead + Seek> {
-    op: ObjParser<T>
+    reader: T
 }
 
 impl<T: BufRead + Seek> FileParser<T> {
     pub fn new(reader: T) -> Self {
-        Self { op: ObjParser::new(reader) }
+        Self { reader }
     }
 
     fn seek_to(&mut self, pos: Offset) -> std::io::Result<u64> {
-        self.op.tkn.bytes().seek(std::io::SeekFrom::Start(pos))
+        self.reader.seek(std::io::SeekFrom::Start(pos))
     }
 
     pub fn read_xref_at(&mut self, start: Offset) -> Result<(XRefType, Box<dyn XRefRead + '_>), Error> {
         self.seek_to(start)?;
-        let tk = self.op.tkn.next()?;
+        let tk = self.reader.read_token_nonempty()?;
         if tk == b"xref" {
-            self.op.tkn.bytes().skip_past_eol()?;
-            Ok((XRefType::Table, Box::new(ReadXRefTable::new(self)?)))
+            self.reader.skip_past_eol()?;
+            Ok((XRefType::Table, Box::new(ReadXRefTable::new(&mut self.reader)?)))
         } else {
-            self.op.tkn.unread(tk);
-            let (oref, obj) = self.read_obj_indirect(&())?;
-            Ok((XRefType::Stream(oref), Box::new(ReadXRefStream::new(self, obj)?)))
+            let (oref, obj) = self.read_obj_indirect(Some(tk), &())?;
+            Ok((XRefType::Stream(oref), Box::new(ReadXRefStream::new(&mut self.reader, obj)?)))
         }
     }
 
     pub fn read_obj_at(&mut self, start: Offset, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
         self.seek_to(start)?;
-        self.read_obj_indirect(locator)
+        self.read_obj_indirect(None, locator)
     }
 
-    pub fn read_raw(&mut self, start: Offset) -> Result<impl Read + use<'_, T>, Error> {
+    pub fn read_raw(&mut self, start: Offset) -> Result<impl BufRead + use<'_, T>, Error> {
         self.seek_to(start)?;
-        Ok(self.op.tkn.bytes())
+        Ok(&mut self.reader)
     }
 
     pub fn find_header(&mut self) -> Result<Header, Error> {
@@ -69,12 +69,11 @@ impl<T: BufRead + Seek> FileParser<T> {
                 .break_value()
         };
 
-        let bytes = self.op.tkn.bytes();
-        let file_len = bytes.seek(std::io::SeekFrom::End(0))?
+        let file_len = self.reader.seek(std::io::SeekFrom::End(0))?
             .try_into().expect("File length should fit into usize.");
-        bytes.seek(std::io::SeekFrom::Start(0))?;
+        self.reader.seek(std::io::SeekFrom::Start(0))?;
 
-        bytes.read_exact(&mut data)?;
+        self.reader.read_exact(&mut data)?;
         if let Some(header) = try_find(&data, from) {
             return Ok(header);
         }
@@ -85,7 +84,7 @@ impl<T: BufRead + Seek> FileParser<T> {
             from = to - OVERLAP;
             to = std::cmp::min(from + BUF_SIZE, file_len);
             data.resize(to - from, 0u8);
-            bytes.read_exact(&mut data[OVERLAP..])?;
+            self.reader.read_exact(&mut data[OVERLAP..])?;
             if let Some(header) = try_find(&data, from) {
                 return Ok(header);
             }
@@ -95,55 +94,58 @@ impl<T: BufRead + Seek> FileParser<T> {
     }
 
     pub fn entrypoint(&mut self) -> Result<Offset, Error> {
-        let bytes = self.op.tkn.bytes();
-        let len = bytes.seek(std::io::SeekFrom::End(0))?;
+        let len = self.reader.seek(std::io::SeekFrom::End(0))?;
         let buf_size = std::cmp::min(len, 1024);
 
         // Read last 1024 bytes
-        bytes.seek(std::io::SeekFrom::End(-(buf_size as i64)))?;
+        self.reader.seek(std::io::SeekFrom::End(-(buf_size as i64)))?;
         // FIXME: use read_buf_exact when stabilized
         let mut data = vec![0; buf_size as usize];
-        bytes.read_exact(&mut data)?;
+        self.reader.read_exact(&mut data)?;
 
         // Find "startxref<EOL>number<EOL>"
         let sxref = data.windows(9)
             .rposition(|w| w == b"startxref")
             .ok_or(Error::Parse("startxref not found"))?;
         let mut cur = Cursor::new(&data[sxref..]);
-        cur.skip_past_eol()?;
+        cur.skip_past_eol()?; // TODO: only tolerate whitespace
         let sxref = utils::parse_num(&cur.read_line_excl()?).ok_or(Error::Parse("malformed startxref"))?;
         Ok(sxref)
     }
 
-    fn read_obj_indirect(&mut self, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
+    fn read_obj_indirect(&mut self, tk: Option<Token>, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
         // TODO: check format of num and gen
-        let Ok(Number::Int(num)) = self.op.read_number() else { return Err(Error::Parse("unexpected token")) };
-        let num = num.try_into().map_err(|_| Error::Parse("invalid object number"))?;
-        let Ok(Number::Int(gen)) = self.op.read_number() else { return Err(Error::Parse("unexpected token")) };
-        let gen = gen.try_into().map_err(|_| Error::Parse("invalid generation number"))?;
+        let tk = match tk {
+            Some(tk) => tk,
+            None => self.reader.read_token_nonempty()?
+        };
+        let num = utils::parse_num(&tk)
+            .ok_or(Error::Parse("invalid object number"))?;
+        let tk = self.reader.read_token_nonempty()?;
+        let gen = utils::parse_num(&tk)
+            .ok_or(Error::Parse("invalid generation number"))?;
         let oref = ObjRef{num, gen};
-        if self.op.tkn.next()? != b"obj" {
+        if self.reader.read_token_nonempty()? != b"obj" {
             return Err(Error::Parse("unexpected token"));
         }
-        let obj = self.op.read_obj()?;
-        match &self.op.tkn.next()?[..] {
+        let obj = ObjParser::new(&mut self.reader).read_obj()?;
+        match &self.reader.read_token_nonempty()?[..] {
             b"endobj" =>
                 Ok((oref, obj)),
             b"stream" => {
                 let Object::Dict(dict) = obj else {
                     return Err(Error::Parse("endobj not found"))
                 };
-                let bytes = self.op.tkn.bytes();
-                match bytes.next_or_eof()? {
+                match self.reader.next_or_eof()? {
                     b'\n' => (),
                     b'\r' => {
-                        if bytes.next_or_eof()? != b'\n' {
+                        if self.reader.next_or_eof()? != b'\n' {
                             return Err(Error::Parse("stream keyword not followed by proper EOL"));
                         }
                     },
                     _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
                 };
-                let offset = bytes.stream_position()?;
+                let offset = self.reader.stream_position()?;
                 let len = self.resolve(dict.lookup(b"Length"), locator)
                     .ok().as_ref().and_then(Object::num_value);
                 let filters = match self.resolve(dict.lookup(b"Filter"), locator).ok() {
@@ -187,24 +189,22 @@ pub trait XRefRead : Iterator<Item = Result<(ObjNum, Record), Error>> {
 }
 
 
-struct ReadXRefTable<'a, T: ByteProvider + Seek> {
-    parser: &'a mut FileParser<T>,
+struct ReadXRefTable<'a, T: BufRead + Seek> {
+    reader: &'a mut T,
     num: ObjNum,
     ceil: ObjNum
 }
 
-impl<'a, T: ByteProvider + Seek> ReadXRefTable<'a, T> {
-    fn new(parser: &'a mut FileParser<T>) -> Result<Self, Error> {
-        let bytes = parser.op.tkn.bytes();
-        let line = bytes.read_line_excl()?.trim_ascii_end().to_owned();
+impl<'a, T: BufRead + Seek> ReadXRefTable<'a, T> {
+    fn new(reader: &'a mut T) -> Result<Self, Error> {
+        let line = reader.read_line_excl()?.trim_ascii_end().to_owned();
         let (start, size) = Self::read_section(&line).map_err(|_| Error::Parse("malformed xref table"))?;
-        Ok(Self { parser, num: start, ceil: start + size })
+        Ok(Self { reader, num: start, ceil: start + size })
     }
 
     fn read_line(&mut self) -> Result<Record, ()> {
-        let bytes = self.parser.op.tkn.bytes();
         let mut line = [0u8; 20];
-        bytes.read_exact(&mut line).map_err(|_| ())?;
+        self.reader.read_exact(&mut line).map_err(|_| ())?;
         if line[10] != b' ' || line[16] != b' ' {
             return Err(());
         }
@@ -225,13 +225,12 @@ impl<'a, T: ByteProvider + Seek> ReadXRefTable<'a, T> {
     }
 }
 
-impl<T: ByteProvider + Seek> Iterator for ReadXRefTable<'_, T> {
+impl<T: BufRead + Seek> Iterator for ReadXRefTable<'_, T> {
     type Item = Result<(ObjNum, Record), Error>;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.num == self.ceil {
-            let bytes = self.parser.op.tkn.bytes();
-            let line = match bytes.read_line_excl() {
+            let line = match self.reader.read_line_excl() {
                 Ok(line) if line == b"trailer" => return None,
                 Ok(line) => line.trim_ascii_end().to_owned(),
                 Err(err) => return Some(Err(err.into()))
@@ -254,19 +253,18 @@ impl<T: ByteProvider + Seek> Iterator for ReadXRefTable<'_, T> {
     }
 }
 
-impl<T: ByteProvider + Seek> XRefRead for ReadXRefTable<'_, T> {
+impl<T: BufRead + Seek> XRefRead for ReadXRefTable<'_, T> {
     fn trailer(mut self: Box<Self>) -> Result<Dict, Error> {
         while self.num < self.ceil {
-            let bytes = self.parser.op.tkn.bytes();
             let skip: i64 = (self.ceil - self.num).try_into().map_err(|_| Error::Parse("range too large"))?;
-            bytes.seek(std::io::SeekFrom::Current(20 * skip))?;
-            let line = bytes.read_line_excl()?.trim_ascii_end().to_owned();
+            self.reader.seek(std::io::SeekFrom::Current(20 * skip))?;
+            let line = self.reader.read_line_excl()?.trim_ascii_end().to_owned();
             if line == b"trailer" { break; }
             let (start, size) = Self::read_section(&line).map_err(|_| Error::Parse("malformed xref table"))?;
             self.num = start;
             self.ceil = start + size;
         }
-        match self.parser.op.read_obj()? {
+        match ObjParser::new(&mut self.reader).read_obj()? {
             Object::Dict(dict) => Ok(dict),
             _ => Err(Error::Parse("malformed trailer"))
         }
@@ -285,7 +283,7 @@ struct ReadXRefStream<'a> {
 }
 
 impl<'a> ReadXRefStream<'a> {
-    fn new<T: ByteProvider + Seek>(parser: &'a mut FileParser<T>, obj: Object) -> Result<Self, Error> {
+    fn new<T: BufRead + Seek>(reader: &'a mut T, obj: Object) -> Result<Self, Error> {
         let Object::Stream(Stream{dict, data: Data::Ref(ind_data)}) = obj
             else { return Err(Error::Parse("malformed xref")) };
         if dict.lookup(b"Type") != &Object::new_name("XRef") {
@@ -324,10 +322,11 @@ impl<'a> ReadXRefStream<'a> {
         let IndirectData{offset, len: Some(len), filters} = ind_data else {
             return Err(Error::Parse("malfomed xref stream (/Length)"));
         };
-        let raw_reader = parser.read_raw(offset)?.take(len);
-        let reader = crate::codecs::decode(raw_reader, &filters);
+        reader.seek(std::io::SeekFrom::Start(offset))?;
+        let codec_in = reader.take(len);
+        let codec_out = crate::codecs::decode(codec_in, &filters);
         Ok(Self {
-            dict, reader,
+            dict, reader: codec_out,
             index_iter: iter, widths,
             num: start, ceil: start + size
         })

@@ -1,32 +1,41 @@
-use std::io::BufRead;
+use std::io::{BufRead, Cursor};
 
 use crate::base::*;
 use crate::utils;
 
 use super::bp::ByteProvider;
 use super::cc::CharClass;
-use super::tk::{Token, Tokenizer};
+use super::tk::*;
 
 pub struct ObjParser<T: BufRead> {
-    pub(crate) tkn: Tokenizer<T>
+    reader: T,
+    stack: Vec<Token>
 }
 
 impl<T: BufRead> ObjParser<T> {
     pub fn new(reader: T) -> Self {
-        Self { tkn: Tokenizer::new(reader) }
+        Self { reader, stack: Default::default() }
+    }
+
+    fn next_token(&mut self) -> Result<Token, Error> {
+        match self.stack.pop() {
+            Some(tk) => Ok(tk),
+            None => self.reader.read_token_nonempty()
+                .map_err(Error::from)
+        }
     }
 
     pub fn read_obj(&mut self) -> Result<Object, Error> {
-        let first = self.tkn.next()?;
+        let first = self.next_token()?;
         match &first[..] {
             b"true" => Ok(Object::Bool(true)),
             b"false" => Ok(Object::Bool(false)),
             b"null" => Ok(Object::Null),
             [b'1'..=b'9', ..] => {
-                self.tkn.unread(first);
+                self.stack.push(first);
                 self.read_number_or_indirect() },
             [b'+' | b'-' | b'0' | b'.', ..] => {
-                self.tkn.unread(first);
+                self.stack.push(first);
                 self.read_number().map(Object::Number) },
             b"(" => self.read_lit_string(),
             b"<" => self.read_hex_string(),
@@ -38,33 +47,33 @@ impl<T: BufRead> ObjParser<T> {
     }
 
     pub fn read_number(&mut self) -> Result<Number, Error> {
-        Self::to_number_inner(&self.tkn.next()?)
+        Self::to_number_inner(&self.next_token()?)
             .map_err(|_| Error::Parse("malformed number"))
     }
 
     fn read_number_or_indirect(&mut self) -> Result<Object, Error> {
-        let num = Self::to_number_inner(&self.tkn.next()?)
+        let num = Self::to_number_inner(&self.next_token()?)
             .map_err(|_| Error::Parse("malformed number"))?;
         let Number::Int(num) = num else {
             return Ok(Object::Number(num))
         };
-        let gen_tk = self.tkn.next()?;
+        let gen_tk = self.next_token()?;
         if matches!(&gen_tk[..], [b'0'] | [b'1'..b'9', ..]) {
             match utils::parse_num(&gen_tk) {
                 Some(gen) => {
-                    let r_tk = self.tkn.next()?;
+                    let r_tk = self.next_token()?;
                     if r_tk == b"R" {
                         let num = num.try_into().unwrap(); // num already checked to start with 1..=9 and i64 fits
                         return Ok(Object::Ref(ObjRef{num, gen}));
                     } else {
-                        self.tkn.unread(r_tk);
-                        self.tkn.unread(gen_tk);
+                        self.stack.push(r_tk);
+                        self.stack.push(gen_tk);
                     }
                 },
-                None => self.tkn.unread(gen_tk)
+                None => self.stack.push(gen_tk)
             }
         } else {
-            self.tkn.unread(gen_tk)
+            self.stack.push(gen_tk)
         }
         Ok(Object::Number(Number::Int(num)))
     }
@@ -83,11 +92,10 @@ impl<T: BufRead> ObjParser<T> {
     fn read_lit_string(&mut self) -> Result<Object, Error> {
         let mut ret = Vec::new();
         let mut parens = 0;
-        let bytes = self.tkn.bytes();
         loop {
-            match bytes.next_or_eof()? {
+            match self.reader.next_or_eof()? {
                 b'\\' => {
-                    let c = match bytes.next_or_eof()? {
+                    let c = match self.reader.next_or_eof()? {
                         b'n' => b'\x0a',
                         b'r' => b'\x0d',
                         b't' => b'\x09',
@@ -96,8 +104,8 @@ impl<T: BufRead> ObjParser<T> {
                         c @ (b'(' | b')' | b'\\') => c,
                         c @ (b'0' ..= b'7') => {
                             let d1 = c - b'0';
-                            let d2 = bytes.next_if(|c| (b'0'..=b'7').contains(&c)).map(|c| c - b'0');
-                            let d3 = bytes.next_if(|c| (b'0'..=b'7').contains(&c)).map(|c| c - b'0');
+                            let d2 = self.reader.next_if(|c| (b'0'..=b'7').contains(&c)).map(|c| c - b'0');
+                            let d3 = self.reader.next_if(|c| (b'0'..=b'7').contains(&c)).map(|c| c - b'0');
                             match (d2, d3) {
                                 (Some(d2), Some(d3)) => (d1 << 6) + (d2 << 3) + d3,
                                 (Some(d2), None) => (d1 << 3) + d2,
@@ -110,7 +118,7 @@ impl<T: BufRead> ObjParser<T> {
                     ret.push(c);
                 },
                 b'\r' => {
-                    bytes.next_if(|c| c == b'\n');
+                    self.reader.next_if(|c| c == b'\n');
                     ret.push(b'\n');
                 },
                 c => {
@@ -129,7 +137,7 @@ impl<T: BufRead> ObjParser<T> {
         let mut msd = None;
         let mut ret = Vec::new();
         loop {
-            let tk = self.tkn.next()?;
+            let tk = self.next_token()?;
             if tk == b">" { break; }
             for c in tk {
                 let dig = utils::hex_value(c).ok_or(Error::Parse("malformed hex string"))?;
@@ -144,12 +152,12 @@ impl<T: BufRead> ObjParser<T> {
     }
 
     fn read_name(&mut self) -> Result<Name, Error> {
-        match self.tkn.bytes().peek() {
+        match self.reader.peek() {
             Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Name(Vec::new())),
             None => return Ok(Name(Vec::new())),
             _ => ()
         };
-        let tk = self.tkn.next()?;
+        let tk = self.next_token()?;
         if !tk.contains(&b'#') {
             return Ok(Name(tk));
         }
@@ -173,9 +181,9 @@ impl<T: BufRead> ObjParser<T> {
     fn read_array(&mut self) -> Result<Object, Error> {
         let mut vec = Vec::new();
         loop {
-            let tk = self.tkn.next()?;
+            let tk = self.next_token()?;
             if tk == b"]" { break; }
-            self.tkn.unread(tk);
+            self.stack.push(tk);
             vec.push(self.read_obj()?);
         }
         Ok(Object::Array(vec))
@@ -184,7 +192,7 @@ impl<T: BufRead> ObjParser<T> {
     fn read_dict(&mut self) -> Result<Object, Error> {
         let mut dict = Vec::new();
         loop {
-            let key = match &self.tkn.next()?[..] {
+            let key = match &self.next_token()?[..] {
                 b">>" => break,
                 b"/" => self.read_name()?,
                 _ => return Err(Error::Parse("malformed dictionary"))
@@ -196,9 +204,9 @@ impl<T: BufRead> ObjParser<T> {
     }
 }
 
-impl<T: Into<String>> From<T> for ObjParser<std::io::Cursor<String>> {
+impl<T: Into<String>> From<T> for ObjParser<Cursor<String>> {
     fn from(input: T) -> Self {
-        ObjParser { tkn: Tokenizer::from(input) }
+        ObjParser::new(Cursor::new(input.into()))
     }
 }
 
