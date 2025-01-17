@@ -118,22 +118,22 @@ mod tests {
     #[test]
     fn test_read_line() {
         let mut bytes = Cursor::new("line 1\nline 2\rline 3\r\nline 4\n\rline 5");
-        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 1");
-        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 2");
-        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 3");
-        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 4");
-        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"");
-        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"line 5");
-        assert!(ByteProvider::read_line_excl(&mut bytes).is_err());
+        assert_eq!(bytes.read_line_excl().unwrap(), b"line 1");
+        assert_eq!(bytes.read_line_excl().unwrap(), b"line 2");
+        assert_eq!(bytes.read_line_excl().unwrap(), b"line 3");
+        assert_eq!(bytes.read_line_excl().unwrap(), b"line 4");
+        assert_eq!(bytes.read_line_excl().unwrap(), b"");
+        assert_eq!(bytes.read_line_excl().unwrap(), b"line 5");
+        assert!(bytes.read_line_excl().is_err());
 
         let mut bytes = Cursor::new("line 1\nline 2\rline 3\r\nline 4\n\rline 5");
-        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 1\n");
-        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 2\r");
-        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 3\r\n");
-        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 4\n");
-        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"\r");
-        assert_eq!(ByteProvider::read_line_incl(&mut bytes).unwrap(), b"line 5");
-        assert!(ByteProvider::read_line_incl(&mut bytes).is_err());
+        assert_eq!(bytes._read_line_incl().unwrap(), b"line 1\n");
+        assert_eq!(bytes._read_line_incl().unwrap(), b"line 2\r");
+        assert_eq!(bytes._read_line_incl().unwrap(), b"line 3\r\n");
+        assert_eq!(bytes._read_line_incl().unwrap(), b"line 4\n");
+        assert_eq!(bytes._read_line_incl().unwrap(), b"\r");
+        assert_eq!(bytes._read_line_incl().unwrap(), b"line 5");
+        assert!(bytes._read_line_incl().is_err());
 
         let mut bytes = Cursor::new("line 1\nline 2\rline 3\r\nline 4\n\rline 5");
         bytes.skip_past_eol().unwrap();
