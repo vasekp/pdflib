@@ -114,15 +114,14 @@ impl<T: BufRead + Seek> FileParser<T> {
     }
 
     fn read_obj_indirect(&mut self, tk: Option<Token>, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
-        // TODO: check format of num and gen
         let tk = match tk {
             Some(tk) => tk,
             None => self.reader.read_token_nonempty()?
         };
-        let num = utils::parse_num(&tk)
+        let num = utils::parse_int_strict(&tk)
             .ok_or(Error::Parse("invalid object number"))?;
         let tk = self.reader.read_token_nonempty()?;
-        let gen = utils::parse_num(&tk)
+        let gen = utils::parse_int_strict(&tk)
             .ok_or(Error::Parse("invalid generation number"))?;
         let oref = ObjRef{num, gen};
         if self.reader.read_token_nonempty()? != b"obj" {

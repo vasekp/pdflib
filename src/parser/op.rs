@@ -58,22 +58,18 @@ impl<T: BufRead> ObjParser<T> {
             return Ok(Object::Number(num))
         };
         let gen_tk = self.next_token()?;
-        if matches!(&gen_tk[..], [b'0'] | [b'1'..b'9', ..]) {
-            match utils::parse_num(&gen_tk) {
-                Some(gen) => {
-                    let r_tk = self.next_token()?;
-                    if r_tk == b"R" {
-                        let num = num.try_into().unwrap(); // num already checked to start with 1..=9 and i64 fits
-                        return Ok(Object::Ref(ObjRef{num, gen}));
-                    } else {
-                        self.stack.push(r_tk);
-                        self.stack.push(gen_tk);
-                    }
-                },
-                None => self.stack.push(gen_tk)
-            }
-        } else {
-            self.stack.push(gen_tk)
+        match utils::parse_int_strict(&gen_tk) {
+            Some(gen) => {
+                let r_tk = self.next_token()?;
+                if r_tk == b"R" {
+                    let num = num.try_into().unwrap(); // num already checked to start with 1..=9 and i64 fits
+                    return Ok(Object::Ref(ObjRef{num, gen}));
+                } else {
+                    self.stack.push(r_tk);
+                    self.stack.push(gen_tk);
+                }
+            },
+            None => self.stack.push(gen_tk)
         }
         Ok(Object::Number(Number::Int(num)))
     }
