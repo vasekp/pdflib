@@ -26,17 +26,17 @@ impl<T: BufRead> ObjParser<T> {
     }
 
     pub fn read_obj(&mut self) -> Result<Object, Error> {
-        let first = self.next_token()?;
-        match &first[..] {
+        let tk = self.next_token()?;
+        match &tk[..] {
             b"true" => Ok(Object::Bool(true)),
             b"false" => Ok(Object::Bool(false)),
             b"null" => Ok(Object::Null),
             [b'1'..=b'9', ..] => {
-                self.stack.push(first);
-                self.read_number_or_indirect() },
-            [b'+' | b'-' | b'0' | b'.', ..] => {
-                self.stack.push(first);
-                self.read_number().map(Object::Number) },
+                self.stack.push(tk);
+                self.read_number_or_indirect()
+            },
+            [b'+' | b'-' | b'0' | b'.', ..]
+                => tk.try_into().map(Object::Number),
             b"(" => self.read_lit_string(),
             b"<" => self.read_hex_string(),
             b"/" => self.read_name().map(Object::Name),
@@ -46,14 +46,8 @@ impl<T: BufRead> ObjParser<T> {
         }
     }
 
-    pub fn read_number(&mut self) -> Result<Number, Error> {
-        Self::to_number_inner(&self.next_token()?)
-            .map_err(|_| Error::Parse("malformed number"))
-    }
-
     fn read_number_or_indirect(&mut self) -> Result<Object, Error> {
-        let num = Self::to_number_inner(&self.next_token()?)
-            .map_err(|_| Error::Parse("malformed number"))?;
+        let num = self.next_token()?.try_into()?;
         let Number::Int(num) = num else {
             return Ok(Object::Number(num))
         };
@@ -72,17 +66,6 @@ impl<T: BufRead> ObjParser<T> {
             None => self.stack.push(gen_tk)
         }
         Ok(Object::Number(Number::Int(num)))
-    }
-
-    fn to_number_inner(tok: &Token) -> Result<Number, Error> {
-        if tok.contains(&b'e') || tok.contains(&b'E') {
-            return Err(Error::Parse("malformed number"))
-        }
-        if tok.contains(&b'.') {
-            Ok(Number::Real(utils::parse_num(tok).ok_or(Error::Parse("malformed number"))?))
-        } else {
-            Ok(Number::Int(utils::parse_num(tok).ok_or(Error::Parse("malformed number"))?))
-        }
     }
 
     fn read_lit_string(&mut self) -> Result<Object, Error> {
@@ -197,6 +180,22 @@ impl<T: BufRead> ObjParser<T> {
             dict.push((key, value));
         }
         Ok(Object::Dict(Dict(dict)))
+    }
+}
+
+impl TryFrom<Token> for Number {
+    type Error = Error;
+
+    fn try_from(tk: Token) -> Result<Number, Error> {
+        let err = Error::Parse("malformed number");
+        if tk.contains(&b'e') || tk.contains(&b'E') {
+            return Err(err)
+        }
+        if tk.contains(&b'.') {
+            Ok(Number::Real(utils::parse_num(&tk).ok_or(err)?))
+        } else {
+            Ok(Number::Int(utils::parse_num(&tk).ok_or(err)?))
+        }
     }
 }
 
