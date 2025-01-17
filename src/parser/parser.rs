@@ -95,8 +95,8 @@ impl<T: BufRead> Parser<T> {
                         b'b' => b'\x08',
                         b'f' => b'\x0c',
                         c @ (b'(' | b')' | b'\\') => c,
-                        d1 @ (b'0' ..= b'7') => {
-                            let d1 = d1 - b'0';
+                        c @ (b'0' ..= b'7') => {
+                            let d1 = c - b'0';
                             let d2 = bytes.next_if(|c| (b'0'..=b'7').contains(&c)).map(|c| c - b'0');
                             let d3 = bytes.next_if(|c| (b'0'..=b'7').contains(&c)).map(|c| c - b'0');
                             match (d2, d3) {
@@ -239,7 +239,7 @@ impl<T: BufRead + Seek> Parser<T> {
         let try_find = |data: &[u8], from: usize| {
             data.windows(HEADER_FULL_LEN)
                 .enumerate()
-                .filter(|(_, w)| &w[0..HEADER_FIXED_LEN] == &HEADER_FIXED)
+                .filter(|(_, w)| w[0..HEADER_FIXED_LEN] == HEADER_FIXED)
                 .try_fold((), |(), (ix, w)| match &w[HEADER_FIXED_LEN..] {
                     [maj @ b'0'..=b'9', b'.', min @ b'0'..=b'9'] => {
                         let start = (from + ix).try_into().expect("Should fit into u64.");
@@ -274,21 +274,6 @@ impl<T: BufRead + Seek> Parser<T> {
         }
 
         Err(Error::Parse("header not found"))
-
-        // FIXME: use iter_map_windows when stabilized
-        /*let bytes = self.tkn.bytes();
-        let start = bytes.bytes()
-            .windows(HEADER_FIXED_LEN) // N/A
-            .position(|w| w == &HEADER_FIXED)
-            .ok_or(Error::Parse("header not found"));
-        bytes.seek(std::io::SeekFrom::Start(start))?;
-        let version_string = [0u8; 3];
-        bytes.read_exact(&mut version_string);
-        let version = match &version_string {
-            [maj @ b'0'..=b'9', b'.', min @ b'0'..=b'9'] => Ok((maj - b'0', min - b'0')),
-            _ => Err(Error::Parse("malformed header"))
-        }?;
-        Ok(Header { start, version })*/
     }
 
     pub fn entrypoint(&mut self) -> Result<Offset, Error> {
