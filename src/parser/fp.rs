@@ -357,7 +357,7 @@ impl<'a> ReadXRefStream<'a> {
             0 => Record::Free{gen: f3, next: f2},
             1 => Record::Used{gen: f3, offset: f2},
             2 => Record::Compr{num: f2, index: f3},
-            _ => unimplemented!()
+            _ => unimplemented!("xref type {tpe}")
         })
     }
 }

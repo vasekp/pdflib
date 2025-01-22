@@ -107,7 +107,7 @@ impl<T: BufRead + Seek> Reader<T> {
                     let objref = ObjRef{num, gen};
                     (objref, parser.read_obj_at(offset, &xrefs[index..]))
                 },
-                _ => todo!()
+                _ => todo!("compressed objects")
             })
     }
 
