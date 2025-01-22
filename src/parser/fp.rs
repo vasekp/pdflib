@@ -55,7 +55,7 @@ impl<T: BufRead + Seek> FileParser<T> {
 
     fn find_header(reader: &mut T) -> Result<Header, Error> {
         const BUF_SIZE: usize = 1024;
-        const HEADER_FIXED: [u8; 5] = *b"%PDF-";
+        const HEADER_FIXED: &[u8] = b"%PDF-";
         const HEADER_FIXED_LEN: usize = HEADER_FIXED.len();
         const HEADER_FULL_LEN: usize = HEADER_FIXED_LEN + 3;
         const OVERLAP: usize = HEADER_FULL_LEN - 1;
@@ -67,7 +67,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         let try_find = |data: &[u8], from: usize| {
             data.windows(HEADER_FULL_LEN)
                 .enumerate()
-                .filter(|(_, w)| w[0..HEADER_FIXED_LEN] == HEADER_FIXED)
+                .filter(|(_, w)| w[0..HEADER_FIXED_LEN] == *HEADER_FIXED)
                 .try_fold((), |(), (ix, w)| match &w[HEADER_FIXED_LEN..] {
                     [maj @ b'0'..=b'9', b'.', min @ b'0'..=b'9'] => {
                         let start = (from + ix).try_into().expect("Should fit into u64.");
@@ -114,10 +114,11 @@ impl<T: BufRead + Seek> FileParser<T> {
         self.reader.read_exact(&mut data)?;
 
         // Find "startxref<EOL>number<EOL>"
-        let sxref = data.windows(9)
+        const SXREF: &[u8] = b"startxref";
+        let sxref = data.windows(SXREF.len())
             .rposition(|w| w == b"startxref")
             .ok_or(Error::Parse("startxref not found"))?;
-        let mut cur = Cursor::new(&data[(sxref+9)..]);
+        let mut cur = Cursor::new(&data[(sxref+SXREF.len())..]);
         cur.read_eol()?;
         let sxref = utils::parse_num(&cur.read_line_excl()?).ok_or(Error::Parse("malformed startxref"))?;
         Ok(sxref)
