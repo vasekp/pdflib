@@ -1,5 +1,6 @@
 use super::bp::ByteProvider;
 use super::cc::CharClass;
+use crate::base::Error;
 
 pub type Token = Vec<u8>;
 
@@ -38,6 +39,13 @@ pub trait Tokenizer: ByteProvider {
             if tk != b" " { return Ok(tk); }
         }
     }
+
+    fn read_eol(&mut self) -> Result<(), Error> {
+        match (self.next_if(|c| c == b'\r'), self.next_if(|c| c == b'\n')) {
+            (None, None) => Err(Error::Parse("EOL expected but not found")),
+            _ => Ok(())
+        }
+    }
 }
 
 impl<T: ByteProvider> Tokenizer for T { }
@@ -72,5 +80,20 @@ mod tests {
         let mut tkn = Cursor::new("A%1\r %2\nB");
         assert_eq!(tkn.read_token_nonempty().unwrap(), b"A");
         assert_eq!(tkn.read_token_nonempty().unwrap(), b"B");
+
+        let mut tkn = Cursor::new("a\r\nb\nc\rd \ne\n\r");
+        assert_eq!(tkn.read_token().unwrap(), b"a");
+        assert!(tkn.read_eol().is_ok());
+        assert_eq!(tkn.read_token().unwrap(), b"b");
+        assert!(tkn.read_eol().is_ok());
+        assert_eq!(tkn.read_token().unwrap(), b"c");
+        assert!(tkn.read_eol().is_ok());
+        assert_eq!(tkn.read_token().unwrap(), b"d");
+        assert!(tkn.read_eol().is_err());
+        assert_eq!(tkn.read_token().unwrap(), b" ");
+        assert_eq!(tkn.read_token().unwrap(), b"e");
+        assert!(tkn.read_eol().is_ok());
+        assert!(tkn.read_eol().is_ok());
+        assert!(tkn.read_eol().is_err());
     }
 }

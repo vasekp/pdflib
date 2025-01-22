@@ -81,30 +81,6 @@ pub trait ByteProvider: BufRead {
     fn _read_line_incl(&mut self) -> std::io::Result<Vec<u8>> {
         self.read_line_inner(true)
     }
-
-    fn skip_past_eol(&mut self) -> std::io::Result<()> {
-        loop {
-            let buf = match self.fill_buf() {
-                Ok(buf) => buf,
-                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(err) => return Err(err)
-            };
-            if buf.is_empty() {
-                return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
-            }
-            match buf.iter().position(|c| *c == b'\n' || *c == b'\r') {
-                Some(pos) => {
-                    let crlf = buf[pos] == b'\r' && buf.len() > pos && buf[pos + 1] == b'\n';
-                    self.consume(pos + if crlf { 2 } else { 1 });
-                    return Ok(());
-                },
-                None => {
-                    let len = buf.len();
-                    self.consume(len);
-                }
-            }
-        }
-    }
 }
 
 impl<T: BufRead> ByteProvider for T { }
@@ -134,13 +110,5 @@ mod tests {
         assert_eq!(bytes._read_line_incl().unwrap(), b"\r");
         assert_eq!(bytes._read_line_incl().unwrap(), b"line 5");
         assert!(bytes._read_line_incl().is_err());
-
-        let mut bytes = Cursor::new("line 1\nline 2\rline 3\r\nline 4\n\rline 5");
-        bytes.skip_past_eol().unwrap();
-        bytes.skip_past_eol().unwrap();
-        bytes.skip_past_eol().unwrap();
-        bytes.skip_past_eol().unwrap();
-        assert_eq!(ByteProvider::read_line_excl(&mut bytes).unwrap(), b"");
-        assert!(ByteProvider::skip_past_eol(&mut bytes).is_err());
     }
 }

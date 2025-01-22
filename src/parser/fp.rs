@@ -35,7 +35,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         self.seek_to(start + self.start())?;
         let tk = self.reader.read_token_nonempty()?;
         if tk == b"xref" {
-            self.reader.skip_past_eol()?;
+            self.reader.read_eol()?;
             Ok((XRefType::Table, Box::new(ReadXRefTable::new(&mut self.reader)?)))
         } else {
             let (oref, obj) = self.read_obj_indirect(Some(tk), &())?;
@@ -117,8 +117,8 @@ impl<T: BufRead + Seek> FileParser<T> {
         let sxref = data.windows(9)
             .rposition(|w| w == b"startxref")
             .ok_or(Error::Parse("startxref not found"))?;
-        let mut cur = Cursor::new(&data[sxref..]);
-        cur.skip_past_eol()?; // TODO: only tolerate whitespace
+        let mut cur = Cursor::new(&data[(sxref+9)..]);
+        cur.read_eol()?;
         let sxref = utils::parse_num(&cur.read_line_excl()?).ok_or(Error::Parse("malformed startxref"))?;
         Ok(sxref)
     }
