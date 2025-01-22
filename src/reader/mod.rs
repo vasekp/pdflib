@@ -46,7 +46,6 @@ impl<T: BufRead + Seek> Reader<T> {
     pub fn new(source: T) -> Self {
         let mut parser = FileParser::new(source);
         let xrefs = BTreeMap::new();
-        println!("{:?}", parser.find_header());
         let entry = parser.entrypoint();
         let mut reader = Reader { parser, xrefs, entry };
         if let &Ok(offset) = &reader.entry {

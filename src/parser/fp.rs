@@ -9,20 +9,30 @@ use super::op::ObjParser;
 use super::tk::{Tokenizer, Token};
 
 pub struct FileParser<T: BufRead + Seek> {
-    reader: T
+    reader: T,
+    header: Result<Header, Error>,
 }
 
 impl<T: BufRead + Seek> FileParser<T> {
-    pub fn new(reader: T) -> Self {
-        Self { reader }
+    pub fn new(mut reader: T) -> Self {
+        let header = Self::find_header(&mut reader);
+        println!("{:?}", header);
+        Self { reader, header }
     }
 
     fn seek_to(&mut self, pos: Offset) -> std::io::Result<u64> {
         self.reader.seek(std::io::SeekFrom::Start(pos))
     }
 
+    fn start(&self) -> Offset {
+        match self.header {
+            Ok(Header{ start, .. }) => start,
+            _ => 0
+        }
+    }
+
     pub fn read_xref_at(&mut self, start: Offset) -> Result<(XRefType, Box<dyn XRefRead + '_>), Error> {
-        self.seek_to(start)?;
+        self.seek_to(start + self.start())?;
         let tk = self.reader.read_token_nonempty()?;
         if tk == b"xref" {
             self.reader.skip_past_eol()?;
@@ -34,16 +44,16 @@ impl<T: BufRead + Seek> FileParser<T> {
     }
 
     pub fn read_obj_at(&mut self, start: Offset, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
-        self.seek_to(start)?;
+        self.seek_to(start + self.start())?;
         self.read_obj_indirect(None, locator)
     }
 
-    pub fn read_raw(&mut self, start: Offset) -> Result<impl BufRead + use<'_, T>, Error> {
-        self.seek_to(start)?;
+    /*pub fn read_raw(&mut self, start: Offset) -> Result<impl BufRead + use<'_, T>, Error> {
+        self.seek_to(start + self.start())?;
         Ok(&mut self.reader)
-    }
+    }*/
 
-    pub fn find_header(&mut self) -> Result<Header, Error> {
+    fn find_header(reader: &mut T) -> Result<Header, Error> {
         const BUF_SIZE: usize = 1024;
         const HEADER_FIXED: [u8; 5] = *b"%PDF-";
         const HEADER_FIXED_LEN: usize = HEADER_FIXED.len();
@@ -69,11 +79,11 @@ impl<T: BufRead + Seek> FileParser<T> {
                 .break_value()
         };
 
-        let file_len = self.reader.seek(std::io::SeekFrom::End(0))?
+        let file_len = reader.seek(std::io::SeekFrom::End(0))?
             .try_into().expect("File length should fit into usize.");
-        self.reader.seek(std::io::SeekFrom::Start(0))?;
+        reader.seek(std::io::SeekFrom::Start(0))?;
 
-        self.reader.read_exact(&mut data)?;
+        reader.read_exact(&mut data)?;
         if let Some(header) = try_find(&data, from) {
             return Ok(header);
         }
@@ -84,7 +94,7 @@ impl<T: BufRead + Seek> FileParser<T> {
             from = to - OVERLAP;
             to = std::cmp::min(from + BUF_SIZE, file_len);
             data.resize(to - from, 0u8);
-            self.reader.read_exact(&mut data[OVERLAP..])?;
+            reader.read_exact(&mut data[OVERLAP..])?;
             if let Some(header) = try_find(&data, from) {
                 return Ok(header);
             }
