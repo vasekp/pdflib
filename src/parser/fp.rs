@@ -1,4 +1,6 @@
 use std::io::{Cursor, Seek, Read, BufRead};
+use std::collections::BTreeMap;
+use std::collections::btree_map::Entry;
 
 use crate::base::*;
 use crate::base::types::*;
@@ -36,18 +38,6 @@ impl<T: BufRead + Seek> FileParser<T> {
         match self.header {
             Ok(Header{ start, .. }) => start,
             _ => 0
-        }
-    }
-
-    pub fn read_xref_at(&mut self, start: Offset) -> Result<(XRefType, Box<dyn XRefRead + '_>), Error> {
-        self.seek_to(start + self.start())?;
-        let tk = self.reader.read_token_nonempty()?;
-        if tk == b"xref" {
-            self.reader.read_eol()?;
-            Ok((XRefType::Table, Box::new(ReadXRefTable::new(&mut self.reader)?)))
-        } else {
-            let (oref, obj) = self.read_obj_indirect(Some(tk), &())?;
-            Ok((XRefType::Stream(oref), Box::new(ReadXRefStream::new(&mut self.reader, obj)?)))
         }
     }
 
@@ -199,111 +189,61 @@ impl<T: BufRead + Seek> FileParser<T> {
             Ok(obj.clone())
         }
     }
-}
 
-
-pub trait XRefRead : Iterator<Item = Result<(ObjNum, Record), Error>> {
-    fn trailer(self: Box<Self>) -> Result<Dict, Error>;
-}
-
-
-struct ReadXRefTable<'a, T: BufRead + Seek> {
-    reader: &'a mut T,
-    num: ObjNum,
-    ceil: ObjNum
-}
-
-impl<'a, T: BufRead + Seek> ReadXRefTable<'a, T> {
-    fn new(reader: &'a mut T) -> Result<Self, Error> {
-        let line = reader.read_line_excl()?.trim_ascii_end().to_owned();
-        let (start, size) = Self::read_section(&line).map_err(|_| Error::Parse("malformed xref table"))?;
-        Ok(Self { reader, num: start, ceil: start + size })
-    }
-
-    fn read_line(&mut self) -> Result<Record, ()> {
-        let mut line = [0u8; 20];
-        self.reader.read_exact(&mut line).map_err(|_| ())?;
-        if line[10] != b' ' || line[16] != b' ' {
-            return Err(());
-        }
-        let v = utils::parse_num(&line[0..10]).ok_or(())?;
-        let gen = utils::parse_num(&line[11..16]).ok_or(())?;
-        match line[17] {
-            b'n' => Ok(Record::Used{gen, offset: v}),
-            b'f' => Ok(Record::Free{gen, next: v}),
-            _ => Err(())
-        }
-    }
-
-    fn read_section(line: &[u8]) -> Result<(ObjNum, ObjNum), ()> {
-        let index = line.iter().position(|c| *c == b' ').ok_or(())?;
-        let start = utils::parse_num(&line[..index]).ok_or(())?;
-        let size = utils::parse_num(&line[(index+1)..]).ok_or(())?;
-        Ok((start, size))
-    }
-}
-
-impl<T: BufRead + Seek> Iterator for ReadXRefTable<'_, T> {
-    type Item = Result<(ObjNum, Record), Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.num == self.ceil {
-            let line = match self.reader.read_line_excl() {
-                Ok(line) if line == b"trailer" => return None,
-                Ok(line) => line.trim_ascii_end().to_owned(),
-                Err(err) => return Some(Err(err.into()))
-            };
-            (self.num, self.ceil) = match Self::read_section(&line) {
-                Ok((start, size)) => (start, start + size),
-                Err(()) => return Some(Err(Error::Parse("malformed xref table")))
-            };
-        }
-        if self.num < self.ceil {
-            let ret = match self.read_line() {
-                Ok(record) => Some(Ok((self.num, record))),
-                Err(()) => Some(Err(Error::Parse("malformed xref table")))
-            };
-            self.num += 1;
-            ret
+    pub fn read_xref_at(&mut self, start: Offset) -> Result<XRef, Error> {
+        self.seek_to(start + self.start())?;
+        let tk = self.reader.read_token_nonempty()?;
+        if tk == b"xref" {
+            self.reader.read_eol()?;
+            self.read_xref_table()
         } else {
-            None
+            self.read_xref_stream(tk)
         }
     }
-}
 
-impl<T: BufRead + Seek> XRefRead for ReadXRefTable<'_, T> {
-    fn trailer(mut self: Box<Self>) -> Result<Dict, Error> {
-        while self.num < self.ceil {
-            let skip: i64 = (self.ceil - self.num).try_into().map_err(|_| Error::Parse("range too large"))?;
-            self.reader.seek(std::io::SeekFrom::Current(20 * skip))?;
+    fn read_xref_table(&mut self) -> Result<XRef, Error> {
+        let mut map = BTreeMap::new();
+        let err = || Error::Parse("malformed xref table");
+        loop {
             let line = self.reader.read_line_excl()?.trim_ascii_end().to_owned();
             if line == b"trailer" { break; }
-            let (start, size) = Self::read_section(&line).map_err(|_| Error::Parse("malformed xref table"))?;
-            self.num = start;
-            self.ceil = start + size;
+            let index = line.iter().position(|c| *c == b' ').ok_or_else(err)?;
+            let start = utils::parse_num::<u64>(&line[..index]).ok_or_else(err)?;
+            let size = utils::parse_num::<u64>(&line[(index+1)..]).ok_or_else(err)?;
+            let mut line = [0u8; 20];
+            for num in start..(start+size) {
+                self.reader.read_exact(&mut line)?;
+                if line[10] != b' ' || line[16] != b' ' {
+                    return Err(err());
+                }
+                let v = utils::parse_num::<u64>(&line[0..10]).ok_or_else(err)?;
+                let gen = utils::parse_num::<u16>(&line[11..16]).ok_or_else(err)?;
+                let rec = match line[17] {
+                    b'n' => Record::Used{gen, offset: v},
+                    b'f' => Record::Free{gen, next: v},
+                    _ => return Err(err())
+                };
+                match map.entry(num) {
+                    Entry::Vacant(entry) => { entry.insert(rec); },
+                    Entry::Occupied(_) => log::warn!("Duplicate object number {num} in xref table")
+                };
+            }
         }
-        match ObjParser::new(&mut self.reader).read_obj()? {
-            Object::Dict(dict) => Ok(dict),
-            _ => Err(Error::Parse("malformed trailer"))
-        }
+        let trailer = match ObjParser::new(&mut self.reader).read_obj()? {
+            Object::Dict(dict) => dict,
+            _ => return Err(Error::Parse("malformed trailer"))
+        };
+        let size = trailer.lookup(b"Size")
+            .num_value()
+            .ok_or(Error::Parse("malformed trailer (missing /Size)"))?;
+        Ok(XRef { tpe: XRefType::Table, map, dict: trailer, size })
     }
-}
 
-
-struct ReadXRefStream<'a> {
-    dict: Dict,
-    reader: Box<dyn Read + 'a>,
-    // FIXME: use iter_array_chunks when stabilized
-    index_iter: <Vec<ObjNum> as IntoIterator>::IntoIter,
-    widths: [usize; 3],
-    num: ObjNum,
-    ceil: ObjNum
-}
-
-impl<'a> ReadXRefStream<'a> {
-    fn new<T: BufRead + Seek>(reader: &'a mut T, obj: Object) -> Result<Self, Error> {
-        let Object::Stream(Stream{dict, data: Data::Ref(ind_data)}) = obj
-            else { return Err(Error::Parse("malformed xref")) };
+    fn read_xref_stream(&mut self, tk: Token) -> Result<XRef, Error> {
+        let (oref, obj) = self.read_obj_indirect(Some(tk), &())?;
+        let Object::Stream(Stream{dict, data: Data::Ref(ind_data)}) = obj else {
+            return Err(Error::Parse("malfomed xref"))
+        };
         if dict.lookup(b"Type") != &Object::new_name("XRef") {
             return Err(Error::Parse("malfomed xref stream (/Type)"))
         }
@@ -317,93 +257,61 @@ impl<'a> ReadXRefStream<'a> {
             Object::Null => vec![0, size],
             _ => return Err(Error::Parse("malfomed xref stream (/Index)"))
         };
-        let mut iter = index.into_iter();
-        let (start, size) = match (iter.next(), iter.next()) {
-            (Some(start), Some(size)) => (start, size),
-            _ => (0, 0)
-        };
 
-        let widths : [_; 3] = match dict.lookup(b"W") {
+        let [w1, w2, w3] = match dict.lookup(b"W") {
             Object::Array(arr) =>
                 arr.iter()
                     .map(|obj| match obj {
-                        &Object::Number(Number::Int(num)) if (0..8).contains(&num) => Ok(num as usize),
+                        &Object::Number(Number::Int(num)) if (0..=8).contains(&num) => Ok(num as usize),
                         _ => Err(Error::Parse("malfomed xref stream (/W)"))
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             _ => return Err(Error::Parse("malfomed xref stream (/W)"))
         }.try_into().map_err(|_| Error::Parse("malfomed xref stream (/W)"))?;
-        if widths[1] == 0 {
+        if w2 == 0 {
             return Err(Error::Parse("malfomed xref stream (/W)"))
         }
 
         let IndirectData{offset, len: Some(len), filters} = ind_data else {
             return Err(Error::Parse("malfomed xref stream (/Length)"));
         };
-        reader.seek(std::io::SeekFrom::Start(offset))?;
-        let codec_in = reader.take(len);
-        let codec_out = crate::codecs::decode(codec_in, &filters);
-        Ok(Self {
-            dict, reader: codec_out,
-            index_iter: iter, widths,
-            num: start, ceil: start + size
-        })
-    }
+        assert_eq!(self.reader.stream_position()?, offset);
+        let codec_in = (&mut self.reader).take(len);
+        let mut codec_out = crate::codecs::decode(codec_in, &filters);
+        let mut read = |w| -> Result<u64, Error> {
+            let mut dec_buf = [0; 8];
+            codec_out.read_exact(&mut dec_buf[(8-w)..8])?;
+            Ok(u64::from_be_bytes(dec_buf))
+        };
 
-    fn read(&mut self, width: usize) -> Result<u64, Error> {
-        let mut dec_buf = [0; 8];
-        self.reader.read_exact(&mut dec_buf[(8-width)..8])?;
-        Ok(u64::from_be_bytes(dec_buf))
-    }
-
-    fn read_line(&mut self) -> Result<Record, Error> {
-        let [w1, w2, w3] = self.widths;
-        let tpe = if w1 > 0 { self.read(w1)? } else { 1 };
-        let f2 = self.read(w2)?;
-        let f3 = self.read(w3)?.try_into()
-            .expect("Generation field larger than 16 bits.");
-        Ok(match tpe {
-            0 => Record::Free{gen: f3, next: f2},
-            1 => Record::Used{gen: f3, offset: f2},
-            2 => Record::Compr{num: f2, index: f3},
-            _ => unimplemented!("xref type {tpe}")
-        })
-    }
-}
-
-impl Iterator for ReadXRefStream<'_> {
-    type Item = Result<(ObjNum, Record), Error>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.num == self.ceil {
-            let start = self.index_iter.next()?;
-            let size = self.index_iter.next()?;
-            self.num = start;
-            self.ceil = start + size;
+        let mut map = BTreeMap::new();
+        // FIXME: use array_chunks() when stabilized
+        for ch in index.chunks_exact(2) {
+            let &[start, len] = ch else { unreachable!() };
+            for num in start..(start + len) {
+                let tpe = if w1 > 0 { read(w1)? } else { 1 };
+                let f2 = read(w2)?;
+                let f3 = read(w3)?.try_into().expect("Generation field larger than 16 bits.");
+                let rec = match tpe {
+                    0 => Record::Free{gen: f3, next: f2},
+                    1 => Record::Used{gen: f3, offset: f2},
+                    2 => Record::Compr{num: f2, index: f3},
+                    _ => unimplemented!("xref type {tpe}")
+                };
+                match map.entry(num) {
+                    Entry::Vacant(entry) => { entry.insert(rec); },
+                    Entry::Occupied(_) => log::warn!("Duplicate object number {num} in xref stream")
+                };
+            }
         }
-        if self.num < self.ceil {
-            let ret = match self.read_line() {
-                Ok(record) => Some(Ok((self.num, record))),
-                Err(err) => Some(Err(err))
-            };
-            self.num += 1;
-            ret
-        } else {
-            None
-        }
-    }
-
-    /*FIXME Check after end?
-       if !deflater.fill_buf()?.is_empty() {
-        return Err(Error::Parse("malfomed xref stream"));
-    }*/
-}
-
-impl XRefRead for ReadXRefStream<'_> {
-    fn trailer(self: Box<Self>) -> Result<Dict, Error> {
-        Ok(self.dict)
+        // FIXME: check after end, needs BufRead
+        /*if !codec_out.fill_buf()?.is_empty() {
+            return Err(Error::Parse("malfomed xref stream"));
+        }*/
+        Ok(XRef { tpe: XRefType::Stream(oref), map, dict, size })
     }
 }
+
 
 #[cfg(test)]
 mod tests {

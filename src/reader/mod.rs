@@ -12,36 +12,6 @@ pub struct Reader<T: BufRead + Seek> {
     entry: Result<Offset, Error>
 }
 
-#[derive(Debug)]
-struct XRef {
-    tpe: XRefType,
-    map: BTreeMap<ObjNum, Record>,
-    trailer: Result<Dict, Error>,
-    size: Option<ObjNum>
-}
-
-impl Locator for XRef {
-    fn locate(&self, objref: &ObjRef) -> Option<Record> {
-        if self.size.map(|size| objref.num >= size) == Some(true) {
-            return Some(Record::default());
-        }
-        match self.map.get(&objref.num)? {
-            rec @ &Record::Used{gen, ..} if gen == objref.gen => Some(*rec),
-            rec @ &Record::Compr{..} if objref.gen == 0 => Some(*rec),
-            rec @ &Record::Free{..} => Some(*rec),
-            _ => Some(Record::default())
-        }
-    }
-}
-
-impl Locator for [&XRef] {
-    fn locate(&self, objref: &ObjRef) -> Option<Record> {
-        self.iter()
-            .flat_map(|xref| xref.locate(objref))
-            .next()
-    }
-}
-
 impl<T: BufRead + Seek> Reader<T> {
     pub fn new(source: T) -> Self {
         let mut parser = FileParser::new(source);
@@ -62,31 +32,10 @@ impl<T: BufRead + Seek> Reader<T> {
             Entry::Vacant(entry) => entry,
             Entry::Occupied(_) => return
         };
-        let (tpe, mut iter) = match self.parser.read_xref_at(offset) {
-            Ok(vals) => vals,
-            Err(err) => {
-                entry.insert(Err(err));
-                return;
-            }
-        };
-        let mut map = BTreeMap::new();
-        while let Some(Ok((num, rec))) = iter.next() {
-            match map.entry(num) {
-                Entry::Vacant(entry) => { entry.insert(rec); },
-                Entry::Occupied(_) => log::warn!("Duplicate number in xref @ {offset}: {num}")
-            };
-        }
-        let trailer = iter.trailer();
-        let (size, prev, xrefstm) = match &trailer {
-            Ok(dict) => (
-                dict.lookup(b"Size").num_value(),
-                dict.lookup(b"Prev").num_value(),
-                dict.lookup(b"XRefStm").num_value()
-            ),
-            Err(_) => (None, None, None)
-        };
-        let xref = XRef { tpe, map, trailer, size };
-        entry.insert(Ok(xref));
+        let xref = self.parser.read_xref_at(offset);
+        let Ok(xref) = entry.insert(xref) else { return };
+        let prev = xref.dict.lookup(b"Prev").num_value();
+        let xrefstm = xref.dict.lookup(b"XRefStm").num_value();
         [xrefstm, prev].into_iter().flatten()
             .for_each(|offset| self.add_xref(offset));
     }
@@ -120,15 +69,14 @@ impl<T: BufRead + Seek> Reader<T> {
                 break;
             }
             ret.push(xref);
-            let Ok(dict) = &xref.trailer else { break };
             'a: {
                 let XRefType::Table = xref.tpe else { break 'a };
-                let Some(xrefstm) = dict.lookup(b"XRefStm").num_value() else { break 'a };
+                let Some(xrefstm) = xref.dict.lookup(b"XRefStm").num_value() else { break 'a };
                 let Some(Ok(xref)) = xrefs.get(&xrefstm) else { break 'a };
                 if ret.iter().any(|&other| std::ptr::eq(other, xref)) { break 'a; }
                 ret.push(xref);
             }
-            next = dict.lookup(b"Prev").num_value();
+            next = xref.dict.lookup(b"Prev").num_value();
         }
         ret
     }
