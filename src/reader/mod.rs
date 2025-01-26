@@ -73,8 +73,7 @@ impl<T: BufRead + Seek> Reader<T> {
         while let Some(Ok((num, rec))) = iter.next() {
             match map.entry(num) {
                 Entry::Vacant(entry) => { entry.insert(rec); },
-                Entry::Occupied(_) =>
-                    eprintln!("Duplicate number in xref @ {offset}: {num}") // FIXME store duplicates somewhere
+                Entry::Occupied(_) => log::warn!("Duplicate number in xref @ {offset}: {num}")
             };
         }
         let trailer = iter.trailer();
@@ -116,7 +115,10 @@ impl<T: BufRead + Seek> Reader<T> {
         let mut next = Some(entry);
         while let Some(offset) = next.take() {
             let Some(Ok(xref)) = xrefs.get(&offset) else { break };
-            if ret.iter().any(|&other| std::ptr::eq(other, xref)) { break; }
+            if ret.iter().any(|&other| std::ptr::eq(other, xref)) {
+                log::warn!("XRef chain detected, breaking");
+                break;
+            }
             ret.push(xref);
             let Ok(dict) = &xref.trailer else { break };
             'a: {

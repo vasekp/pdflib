@@ -4,6 +4,11 @@ use std::io::BufReader;
 use std::fs::File;
 
 fn main() -> Result<(), pdflib::base::Error> {
+    stderrlog::new()
+        .verbosity(log::Level::Trace)
+        .init()
+        .unwrap();
+
     let fname = std::env::args().nth(1).unwrap_or("tests/basic.pdf".into());
 
     let mut rdr = Reader::new(BufReader::new(File::open(fname)?));

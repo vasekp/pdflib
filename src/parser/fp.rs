@@ -16,7 +16,15 @@ pub struct FileParser<T: BufRead + Seek> {
 impl<T: BufRead + Seek> FileParser<T> {
     pub fn new(mut reader: T) -> Self {
         let header = Self::find_header(&mut reader);
-        println!("{:?}", header);
+        match &header {
+            Ok(Header { start, version }) => {
+                log::info!("PDF version {}.{}", version.0, version.1);
+                if *start != 0 {
+                    log::info!("Offset start @ {start}");
+                }
+            },
+            Err(err) => log::warn!("{}", err)
+        }
         Self { reader, header }
     }
 
