@@ -41,9 +41,9 @@ impl<T: BufRead + Seek> FileParser<T> {
         }
     }
 
-    pub fn read_obj_at(&mut self, start: Offset, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
+    pub fn read_obj_at(&mut self, start: Offset) -> Result<(ObjRef, Object), Error> {
         self.seek_to(start + self.start())?;
-        self.read_obj_indirect(None, locator)
+        self.read_obj_indirect(None)
     }
 
     /*pub fn read_raw(&mut self, start: Offset) -> Result<impl BufRead + use<'_, T>, Error> {
@@ -122,7 +122,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         Ok(sxref)
     }
 
-    fn read_obj_indirect(&mut self, tk: Option<Token>, locator: &(impl Locator + ?Sized)) -> Result<(ObjRef, Object), Error> {
+    fn read_obj_indirect(&mut self, tk: Option<Token>) -> Result<(ObjRef, Object), Error> {
         let tk = match tk {
             Some(tk) => tk,
             None => self.reader.read_token_nonempty()?
@@ -154,32 +154,19 @@ impl<T: BufRead + Seek> FileParser<T> {
                     _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
                 };
                 let offset = self.reader.stream_position()?;
-                let len = self.resolve(dict.lookup(b"Length"), locator)
-                    .ok().as_ref().and_then(Object::num_value);
-                let filters = match self.resolve(dict.lookup(b"Filter"), locator).ok() {
-                    Some(Object::Name(name)) => vec![name],
-                    Some(Object::Array(vec)) => vec.iter()
-                        .map(|obj| match self.resolve(obj, locator).ok() {
-                            Some(Object::Name(name)) => Some(name),
-                            _ => None
-                        })
-                        .collect::<Option<Vec<_>>>()
-                        .unwrap_or(vec![]),
-                    _ => vec![]
-                };
-                let stm = Stream { dict, data: Data::Ref(IndirectData { offset, len, filters }) };
+                let stm = Stream { dict, data: Data::Ref(offset) };
                 Ok((oref, Object::Stream(stm)))
             },
             _ => Err(Error::Parse("endobj not found"))
         }
     }
 
-    fn resolve(&mut self, obj: &Object, locator: &(impl Locator + ?Sized)) -> Result<Object, Error> {
+    /*fn resolve(&mut self, obj: &Object, locator: &(impl Locator + ?Sized)) -> Result<Object, Error> {
         if let Object::Ref(objref) = obj {
             let Some(offset) = locator.locate_offset(objref) else {
                 return Ok(Object::Null)
             };
-            let (readref, obj) = self.read_obj_at(offset, locator)?;
+            let (readref, obj) = self.read_obj_at(offset)?;
             if &readref == objref {
                 Ok(obj)
             } else {
@@ -188,7 +175,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         } else {
             Ok(obj.clone())
         }
-    }
+    }*/
 
     pub fn read_xref_at(&mut self, start: Offset) -> Result<XRef, Error> {
         self.seek_to(start + self.start())?;
@@ -240,8 +227,8 @@ impl<T: BufRead + Seek> FileParser<T> {
     }
 
     fn read_xref_stream(&mut self, tk: Token) -> Result<XRef, Error> {
-        let (oref, obj) = self.read_obj_indirect(Some(tk), &())?;
-        let Object::Stream(Stream{dict, data: Data::Ref(ind_data)}) = obj else {
+        let (oref, obj) = self.read_obj_indirect(Some(tk))?;
+        let Object::Stream(Stream{dict, data: Data::Ref(offset)}) = obj else {
             return Err(Error::Parse("malfomed xref"))
         };
         if dict.lookup(b"Type") != &Object::new_name("XRef") {
@@ -272,10 +259,20 @@ impl<T: BufRead + Seek> FileParser<T> {
             return Err(Error::Parse("malfomed xref stream (/W)"))
         }
 
-        let IndirectData{offset, len: Some(len), filters} = ind_data else {
-            return Err(Error::Parse("malfomed xref stream (/Length)"));
-        };
         assert_eq!(self.reader.stream_position()?, offset);
+        let len = dict.lookup(b"Length")
+            .num_value()
+            .ok_or(Error::Parse("malfomed xref stream (/Length)"))?;
+        let filters = match dict.lookup(b"Filter") {
+            Object::Name(name) => vec![name.to_owned()],
+            Object::Array(vec) => vec.iter()
+                .map(|obj| match obj {
+                    Object::Name(name) => Ok(name.to_owned()),
+                    _ => return Err(Error::Parse("malformed xref stream (/Filter)"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            _ => vec![]
+        };
         let codec_in = (&mut self.reader).take(len);
         let mut codec_out = crate::codecs::decode(codec_in, &filters);
         let mut read = |w| -> Result<u64, Error> {

@@ -50,10 +50,10 @@ impl<T: BufRead + Seek> Reader<T> {
             .flat_map(|(index, xref)| xref.map.iter().map(move |(num, rec)| (num, rec, index)))
             .filter(|(_, rec, _)| !matches!(rec, Record::Free{..}))
             // all used objects in all xrefs + back-reference to section
-            .map(move |(&num, rec, index)| match rec {
+            .map(move |(&num, rec, _index)| match rec {
                 &Record::Used{gen, offset} => {
                     let objref = ObjRef{num, gen};
-                    (objref, parser.read_obj_at(offset, &xrefs[index..]))
+                    (objref, parser.read_obj_at(offset/*, &xrefs[index..]*/))
                 },
                 _ => todo!("compressed objects")
             })

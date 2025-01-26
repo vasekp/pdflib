@@ -9,14 +9,6 @@ pub struct Stream {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Data {
-    Ref(IndirectData),
+    Ref(Offset),
     Val(Vec<u8>)
-}
-
-#[derive(Debug, PartialEq, Default, Clone)]
-pub struct IndirectData {
-    pub offset: Offset,
-    pub len: Option<u64>,
-    pub filters: Vec<Name>,
-    // TODO fparams: Option<Dict>
 }
