@@ -2,8 +2,8 @@ use std::io::*;
 use crate::parser::tk::Tokenizer;
 use crate::utils;
 
-pub fn decode<R: Read>(input: R) -> AsciiHexDecoder<BufReader<R>> {
-    AsciiHexDecoder::new(input)
+pub fn decode<R: BufRead>(input: R) -> BufReader<AsciiHexDecoder<R>> {
+    BufReader::new(AsciiHexDecoder::new(input))
 }
 
 pub struct AsciiHexDecoder<R: BufRead> {
@@ -12,17 +12,15 @@ pub struct AsciiHexDecoder<R: BufRead> {
     done: bool
 }
 
-impl<R: Read> AsciiHexDecoder<BufReader<R>> {
+impl<R: BufRead> AsciiHexDecoder<R> {
     fn new(input: R) -> Self {
         AsciiHexDecoder {
-            reader: BufReader::new(input),
+            reader: input,
             rem: Default::default(),
             done: false
         }
     }
-}
 
-impl<R: BufRead> AsciiHexDecoder<R> {
     fn next_in(&mut self) -> std::io::Result<Option<u8>> {
         if self.done { return Ok(None); }
         let mut buf = [0];

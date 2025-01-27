@@ -301,10 +301,9 @@ impl<T: BufRead + Seek> FileParser<T> {
                 };
             }
         }
-        // FIXME: check after end, needs BufRead
-        /*if !codec_out.fill_buf()?.is_empty() {
+        if !codec_out.fill_buf()?.is_empty() {
             return Err(Error::Parse("malfomed xref stream"));
-        }*/
+        }
         Ok(XRef { tpe: XRefType::Stream(oref), map, dict, size })
     }
 }
