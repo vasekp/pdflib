@@ -7,14 +7,14 @@ use super::bp::ByteProvider;
 use super::cc::CharClass;
 use super::tk::*;
 
-pub struct ObjParser<T: BufRead> {
+pub(crate) struct ObjParser<T: BufRead> {
     reader: T,
     stack: Vec<Token>
 }
 
 impl<T: BufRead> ObjParser<T> {
-    pub fn new(reader: T) -> Self {
-        Self { reader, stack: Default::default() }
+    fn new(reader: T) -> Self {
+        Self { reader, stack: Vec::with_capacity(2) }
     }
 
     fn next_token(&mut self) -> Result<Token, Error> {
