@@ -25,7 +25,18 @@ impl<T: BufRead> ObjParser<T> {
         }
     }
 
-    pub fn read_obj(&mut self) -> Result<Object, Error> {
+    pub fn read_obj(reader: &mut T) -> Result<Object, Error> {
+        let tk = reader.read_token_nonempty()?;
+        if matches!(tk[..], [b'0'..=b'9' | b'+' | b'-' | b'.', ..]) {
+            tk.try_into().map(Object::Number)
+        } else {
+            let mut op = ObjParser::new(reader);
+            op.stack.push(tk);
+            op.read_obj_inner()
+        }
+    }
+
+    fn read_obj_inner(&mut self) -> Result<Object, Error> {
         let tk = self.next_token()?;
         match &tk[..] {
             b"true" => Ok(Object::Bool(true)),
@@ -163,7 +174,7 @@ impl<T: BufRead> ObjParser<T> {
             let tk = self.next_token()?;
             if tk == b"]" { break; }
             self.stack.push(tk);
-            vec.push(self.read_obj()?);
+            vec.push(self.read_obj_inner()?);
         }
         Ok(Object::Array(vec))
     }
@@ -176,10 +187,19 @@ impl<T: BufRead> ObjParser<T> {
                 b"/" => self.read_name()?,
                 _ => return Err(Error::Parse("malformed dictionary"))
             };
-            let value = self.read_obj()?;
+            let value = self.read_obj_inner()?;
             dict.push((key, value));
         }
         Ok(Object::Dict(Dict(dict)))
+    }
+}
+
+#[cfg(debug_assertions)]
+impl<T: BufRead> Drop for ObjParser<T> {
+    fn drop(&mut self) {
+        for tk in &self.stack {
+            log::error!("Dropping stacked token: {}", std::str::from_utf8(tk).unwrap())
+        }
     }
 }
 
@@ -213,126 +233,126 @@ mod tests {
     #[test]
     fn test_read_obj() {
         let mut parser = ObjParser::from("true false null 123 +17 -98 0 00987 34.5 -3.62 +123.6 4. -.002 0.0 009.87");
-        assert_eq!(parser.read_obj().unwrap(), Object::Bool(true));
-        assert_eq!(parser.read_obj().unwrap(), Object::Bool(false));
-        assert_eq!(parser.read_obj().unwrap(), Object::Null);
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(123)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(17)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(-98)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(0)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(987)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(34.5)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(-3.62)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(123.6)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(4.)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(-0.002)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(0.)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Real(9.87)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Bool(true));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Bool(false));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Null);
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(123)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(17)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(-98)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(0)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(987)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Real(34.5)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Real(-3.62)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Real(123.6)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Real(4.)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Real(-0.002)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Real(0.)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Real(9.87)));
 
         let mut parser = ObjParser::from("9223372036854775807 9223372036854775808");
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(9223372036854775807)));
-        assert!(parser.read_obj().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(9223372036854775807)));
+        assert!(parser.read_obj_inner().is_err());
 
         let mut parser = ObjParser::from("++1 1..0 .1. 1_ 1a 16#FFFE . 6.023E23 true");
-        assert!(parser.read_obj().is_err());
-        assert!(parser.read_obj().is_err());
-        assert!(parser.read_obj().is_err());
-        assert!(parser.read_obj().is_err());
-        assert!(parser.read_obj().is_err());
-        assert!(parser.read_obj().is_err());
-        assert!(parser.read_obj().is_err());
-        assert!(parser.read_obj().is_err());
-        assert_eq!(parser.read_obj().unwrap(), Object::Bool(true));
+        assert!(parser.read_obj_inner().is_err());
+        assert!(parser.read_obj_inner().is_err());
+        assert!(parser.read_obj_inner().is_err());
+        assert!(parser.read_obj_inner().is_err());
+        assert!(parser.read_obj_inner().is_err());
+        assert!(parser.read_obj_inner().is_err());
+        assert!(parser.read_obj_inner().is_err());
+        assert!(parser.read_obj_inner().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Bool(true));
     }
 
     #[test]
     fn test_read_lit_string() {
         let mut parser = ObjParser::from("(string) (new
 line) (parens() (*!&}^%etc).) () ((0)) (()");
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("string"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("new\nline"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("parens() (*!&}^%etc)."));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string(""));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("(0)"));
-        assert!(parser.read_obj().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("string"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("new\nline"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("parens() (*!&}^%etc)."));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string(""));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("(0)"));
+        assert!(parser.read_obj_inner().is_err());
 
         let mut parser = ObjParser::from("(These \\
 two strings \\
 are the same.) (These two strings are the same.)");
-        assert_eq!(parser.read_obj().unwrap(), parser.read_obj().unwrap());
+        assert_eq!(parser.read_obj_inner().unwrap(), parser.read_obj_inner().unwrap());
 
         let mut parser = ObjParser::from("(1
 ) (2\\n) (3\\r) (4\\r\\n)");
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("1\n"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("2\n"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("3\r"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("4\r\n"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("1\n"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("2\n"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("3\r"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("4\r\n"));
 
         let mut parser = ObjParser::from("(1
 ) (2\n) (3\r) (4\r\n)");
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("1\n"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("2\n"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("3\n"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("4\n"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("1\n"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("2\n"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("3\n"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("4\n"));
 
         let mut parser = ObjParser::from("(\\157cta\\154) (\\500) (\\0053\\053\\53) (\\53x)");
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("octal"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("@"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("\x053++"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("+x"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("octal"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("@"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("\x053++"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("+x"));
     }
 
     #[test]
     fn test_read_hex_string() {
         let mut parser = ObjParser::from("<4E6F762073686D6F7A206B6120706F702E> <901FA3> <901fa>");
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("Nov shmoz ka pop."));
-        assert_eq!(parser.read_obj().unwrap(), Object::String(vec![0x90, 0x1F, 0xA3]));
-        assert_eq!(parser.read_obj().unwrap(), Object::String(vec![0x90, 0x1F, 0xA0]));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("Nov shmoz ka pop."));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::String(vec![0x90, 0x1F, 0xA3]));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::String(vec![0x90, 0x1F, 0xA0]));
 
         let mut parser = ObjParser::from("<61\r\n6 2> <61%comment\n> <61%unterminated>");
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("ab"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_string("a"));
-        assert!(parser.read_obj().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("ab"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_string("a"));
+        assert!(parser.read_obj_inner().is_err());
     }
 
     #[test]
     fn test_read_name() {
         let mut parser = ObjParser::from("/Name1 /A;Name_With-Various***Characters? /1.2 /$$ /@pattern
             /.notdef /Lime#20Green /paired#28#29parentheses /The_Key_of_F#23_Minor /A#42");
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("Name1"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("A;Name_With-Various***Characters?"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("1.2"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("$$"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("@pattern"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name(".notdef"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("Lime Green"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("paired()parentheses"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("The_Key_of_F#_Minor"));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("AB"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("Name1"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("A;Name_With-Various***Characters?"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("1.2"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("$$"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("@pattern"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name(".notdef"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("Lime Green"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("paired()parentheses"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("The_Key_of_F#_Minor"));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("AB"));
 
         let mut parser = ObjParser::from("//%\n1 /ok /invalid#00byte /#0x /#0 true");
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name(""));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name(""));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
-        assert_eq!(parser.read_obj().unwrap(), Object::new_name("ok"));
-        assert!(parser.read_obj().is_err());
-        assert!(parser.read_obj().is_err());
-        assert!(parser.read_obj().is_err());
-        assert_eq!(parser.read_obj().unwrap(), Object::Bool(true));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name(""));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name(""));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::new_name("ok"));
+        assert!(parser.read_obj_inner().is_err());
+        assert!(parser.read_obj_inner().is_err());
+        assert!(parser.read_obj_inner().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Bool(true));
     }
 
     #[test]
     fn test_read_array() {
         let mut parser = ObjParser::from("[549 3.14 false (Ralph) /SomeName] [ %\n ] [false%]");
-        assert_eq!(parser.read_obj().unwrap(), Object::Array(vec![
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Array(vec![
                 Object::Number(Number::Int(549)),
                 Object::Number(Number::Real(3.14)),
                 Object::Bool(false),
                 Object::new_string("Ralph"),
                 Object::new_name("SomeName")
         ]));
-        assert_eq!(parser.read_obj().unwrap(), Object::Array(Vec::new()));
-        assert!(parser.read_obj().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Array(Vec::new()));
+        assert!(parser.read_obj_inner().is_err());
     }
 
     #[test]
@@ -349,7 +369,7 @@ are the same.) (These two strings are the same.)");
         /VeryLastItem (OK)
         >>
     >>");
-        assert_eq!(parser.read_obj().unwrap(), Object::Dict(Dict(vec![
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Dict(Dict(vec![
             (Name::from("Type"), Object::new_name("Example")),
             (Name::from("Subtype"), Object::new_name("DictionaryExample")),
             (Name::from("Version"), Object::Number(Number::Real(0.01))),
@@ -367,34 +387,34 @@ are the same.) (These two strings are the same.)");
     #[test]
     fn test_read_indirect() {
         let mut parser = ObjParser::from("<</Length 8 0 R>>");
-        assert_eq!(parser.read_obj().unwrap(), Object::Dict(Dict(vec![
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Dict(Dict(vec![
             (Name::from("Length"), Object::Ref(ObjRef{num: 8, gen: 0}))
         ])));
 
         let mut parser = ObjParser::from("1 2 3 R 4 R");
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Ref(ObjRef{num: 2, gen: 3}));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(4)));
-        assert!(parser.read_obj().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Ref(ObjRef{num: 2, gen: 3}));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(4)));
+        assert!(parser.read_obj_inner().is_err());
 
         let mut parser = ObjParser::from("0 0 R");
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(0)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(0)));
-        assert!(parser.read_obj().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(0)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(0)));
+        assert!(parser.read_obj_inner().is_err());
 
         let mut parser = ObjParser::from("01 0 R");
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(0)));
-        assert!(parser.read_obj().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(0)));
+        assert!(parser.read_obj_inner().is_err());
 
         let mut parser = ObjParser::from("1 01 R");
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
-        assert!(parser.read_obj().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(1)));
+        assert!(parser.read_obj_inner().is_err());
 
         let mut parser = ObjParser::from("1 +1 R");
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
-        assert_eq!(parser.read_obj().unwrap(), Object::Number(Number::Int(1)));
-        assert!(parser.read_obj().is_err());
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(1)));
+        assert!(parser.read_obj_inner().is_err());
     }
 }

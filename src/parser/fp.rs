@@ -136,7 +136,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         if self.reader.read_token_nonempty()? != b"obj" {
             return Err(Error::Parse("unexpected token"));
         }
-        let obj = ObjParser::new(&mut self.reader).read_obj()?;
+        let obj = ObjParser::read_obj(&mut self.reader)?;
         match &self.reader.read_token_nonempty()?[..] {
             b"endobj" =>
                 Ok((oref, obj)),
@@ -216,7 +216,7 @@ impl<T: BufRead + Seek> FileParser<T> {
                 };
             }
         }
-        let trailer = match ObjParser::new(&mut self.reader).read_obj()? {
+        let trailer = match ObjParser::read_obj(&mut self.reader)? {
             Object::Dict(dict) => dict,
             _ => return Err(Error::Parse("malformed trailer"))
         };
