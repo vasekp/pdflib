@@ -268,7 +268,7 @@ impl<T: BufRead + Seek> FileParser<T> {
             Object::Array(vec) => vec.iter()
                 .map(|obj| match obj {
                     Object::Name(name) => Ok(name.to_owned()),
-                    _ => return Err(Error::Parse("malformed xref stream (/Filter)"))
+                    _ => Err(Error::Parse("malformed xref stream (/Filter)"))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
             _ => vec![]

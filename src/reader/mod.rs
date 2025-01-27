@@ -8,8 +8,8 @@ use crate::parser::FileParser;
 
 pub struct Reader<T: BufRead + Seek> {
     parser: FileParser<T>,
-    xrefs: BTreeMap<Offset, Result<XRef, Error>>,
-    entry: Result<Offset, Error>
+    xrefs: BTreeMap<Offset, XRef>,
+    entry: Option<Offset>
 }
 
 impl<T: BufRead + Seek> Reader<T> {
@@ -17,9 +17,12 @@ impl<T: BufRead + Seek> Reader<T> {
         let mut parser = FileParser::new(source);
         let xrefs = BTreeMap::new();
         let entry = parser.entrypoint();
-        let mut reader = Reader { parser, xrefs, entry };
-        if let &Ok(offset) = &reader.entry {
-            reader.add_xref(offset);
+        if let Err(err) = &entry {
+            log::error!("Entrypoint not found: {err}");
+        }
+        let mut reader = Reader { parser, xrefs, entry: entry.ok() };
+        if let Some(offset) = &reader.entry {
+            reader.add_xref(*offset);
         }
         for (off, xref) in &reader.xrefs {
             println!("{off}: {xref:?}\n");
@@ -32,8 +35,14 @@ impl<T: BufRead + Seek> Reader<T> {
             Entry::Vacant(entry) => entry,
             Entry::Occupied(_) => return
         };
-        let xref = self.parser.read_xref_at(offset);
-        let Ok(xref) = entry.insert(xref) else { return };
+        let xref = match self.parser.read_xref_at(offset) {
+            Ok(xref) => xref,
+            Err(err) => {
+                log::error!("Error reading xref at {offset}: {err}");
+                return;
+            }
+        };
+        let xref = entry.insert(xref);
         let prev = xref.dict.lookup(b"Prev").num_value();
         let xrefstm = xref.dict.lookup(b"XRefStm").num_value();
         [xrefstm, prev].into_iter().flatten()
@@ -42,7 +51,7 @@ impl<T: BufRead + Seek> Reader<T> {
 
     pub fn objects(&mut self) -> impl Iterator<Item = (ObjRef, Result<(ObjRef, Object), Error>)> + '_ {
         let xrefs = match self.entry {
-            Ok(entry) => Self::build_xref_list(&self.xrefs, entry),
+            Some(entry) => Self::build_xref_list(&self.xrefs, entry),
             _ => vec![]
         };
         let parser = &mut self.parser;
@@ -59,11 +68,11 @@ impl<T: BufRead + Seek> Reader<T> {
             })
     }
 
-    fn build_xref_list(xrefs: &BTreeMap<Offset, Result<XRef, Error>>, entry: Offset) -> Vec<&XRef> {
+    fn build_xref_list(xrefs: &BTreeMap<Offset, XRef>, entry: Offset) -> Vec<&XRef> {
         let mut ret: Vec<&XRef> = Vec::new();
         let mut next = Some(entry);
         while let Some(offset) = next.take() {
-            let Some(Ok(xref)) = xrefs.get(&offset) else { break };
+            let Some(xref) = xrefs.get(&offset) else { break };
             if ret.iter().any(|&other| std::ptr::eq(other, xref)) {
                 log::warn!("XRef chain detected, breaking");
                 break;
@@ -72,7 +81,7 @@ impl<T: BufRead + Seek> Reader<T> {
             'a: {
                 let XRefType::Table = xref.tpe else { break 'a };
                 let Some(xrefstm) = xref.dict.lookup(b"XRefStm").num_value() else { break 'a };
-                let Some(Ok(xref)) = xrefs.get(&xrefstm) else { break 'a };
+                let Some(xref) = xrefs.get(&xrefstm) else { break 'a };
                 if ret.iter().any(|&other| std::ptr::eq(other, xref)) { break 'a; }
                 ret.push(xref);
             }
