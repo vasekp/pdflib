@@ -231,7 +231,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_read_obj() {
+    fn test_read_primitives() {
         let mut parser = ObjParser::from("true false null 123 +17 -98 0 00987 34.5 -3.62 +123.6 4. -.002 0.0 009.87");
         assert_eq!(parser.read_obj_inner().unwrap(), Object::Bool(true));
         assert_eq!(parser.read_obj_inner().unwrap(), Object::Bool(false));
@@ -416,5 +416,22 @@ are the same.) (These two strings are the same.)");
         assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(1)));
         assert_eq!(parser.read_obj_inner().unwrap(), Object::Number(Number::Int(1)));
         assert!(parser.read_obj_inner().is_err());
+    }
+
+    #[test]
+    fn test_read_obj() {
+        let mut input = Cursor::new("0012");
+        assert_eq!(ObjParser::read_obj(&mut input).unwrap(), Object::Number(Number::Int(12)));
+
+        let mut input = Cursor::new("1 0 R");
+        assert_eq!(ObjParser::read_obj(&mut input).unwrap(), Object::Number(Number::Int(1)));
+
+        let mut input = Cursor::new("<</Length 8 0 R>>");
+        assert_eq!(ObjParser::read_obj(&mut input).unwrap(), Object::Dict(Dict(vec![
+            (Name::from("Length"), Object::Ref(ObjRef{num: 8, gen: 0}))
+        ])));
+
+        let mut input = Cursor::new("R");
+        assert!(ObjParser::read_obj(&mut input).is_err());
     }
 }
