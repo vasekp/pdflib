@@ -14,12 +14,10 @@ fn main() -> Result<(), pdflib::base::Error> {
     let mut rdr = Reader::new(BufReader::new(File::open(fname)?));
     for (objref, res) in rdr.objects() {
         match res {
-            Ok((readref, obj)) if readref == objref => println!("{objref}: {obj}"),
-            Ok((readref, obj)) => println!("{objref} / MISMATCH {readref}: {obj}"),
+            Ok((obj, _)) => println!("{objref}: {obj}"),
             Err(err) => println!("{objref}: {err}")
         }
     }
-    println!();
 
     /*for (oref, offset) in recs {
         let obj = parser.read_obj_at(offset, &oref)?;

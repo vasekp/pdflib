@@ -1,6 +1,6 @@
 use std::io::{BufRead, Seek};
-use std::collections::BTreeMap;
-use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, VecDeque};
+use std::rc::Rc;
 
 use crate::base::*;
 use crate::base::types::*;
@@ -8,85 +8,105 @@ use crate::parser::FileParser;
 
 pub struct Reader<T: BufRead + Seek> {
     parser: FileParser<T>,
-    xrefs: BTreeMap<Offset, XRef>,
+    xrefs: BTreeMap<Offset, Rc<XRefLink>>,
     entry: Option<Offset>
+}
+
+struct XRefLink {
+    curr: XRef,
+    next: Option<Rc<XRefLink>>
 }
 
 impl<T: BufRead + Seek> Reader<T> {
     pub fn new(source: T) -> Self {
         let mut parser = FileParser::new(source);
         let xrefs = BTreeMap::new();
-        let entry = parser.entrypoint();
-        if let Err(err) = &entry {
-            log::error!("Entrypoint not found: {err}");
-        }
-        let mut reader = Reader { parser, xrefs, entry: entry.ok() };
+        let entry = match parser.entrypoint() {
+            Ok(offset) => Some(offset),
+            Err(err) => {
+                log::error!("Entrypoint not found: {err}");
+                None
+            }
+        };
+        let mut reader = Reader { parser, xrefs, entry };
         if let Some(offset) = &reader.entry {
-            reader.add_xref(*offset);
+            reader.build_xref_list(*offset);
         }
-        for (off, xref) in &reader.xrefs {
-            println!("{off}: {xref:?}\n");
+        for (offset, link) in &reader.xrefs {
+            println!("{offset}: {:?}\n", link.curr);
         }
         reader
     }
 
-    fn add_xref(&mut self, offset: Offset) {
-        let entry = match self.xrefs.entry(offset) {
-            Entry::Vacant(entry) => entry,
-            Entry::Occupied(_) => return
-        };
-        let xref = match self.parser.read_xref_at(offset) {
-            Ok(xref) => xref,
-            Err(err) => {
-                log::error!("Error reading xref at {offset}: {err}");
-                return;
+    fn build_xref_list(&mut self, entry: Offset) {
+        let mut queue = VecDeque::from([(entry, false)]);
+        let mut order = Vec::new();
+        let mut next_rc = None;
+        while let Some((offset, is_aside)) = queue.pop_front() {
+            if order.iter().any(|(o, _)| o == &offset) {
+                log::warn!("Breaking xref chain detected at {offset}.");
+                break;
             }
-        };
-        let xref = entry.insert(xref);
-        let prev = xref.dict.lookup(b"Prev").num_value();
-        let xrefstm = xref.dict.lookup(b"XRefStm").num_value();
-        [xrefstm, prev].into_iter().flatten()
-            .for_each(|offset| self.add_xref(offset));
+            if let Some(rc) = self.xrefs.get(&offset) {
+                next_rc = Some(rc.clone());
+                break;
+            }
+            let xref = match self.parser.read_xref_at(offset) {
+                Ok(xref) => xref,
+                Err(err) => {
+                    log::error!("Error reading xref at {offset}: {err}");
+                    break;
+                }
+            };
+            if matches!(xref.tpe, XRefType::Table) {
+                if let Some(offset) = xref.dict.lookup(b"XRefStm").num_value() {
+                    if !is_aside {
+                        queue.push_back((offset, true));
+                    } else {
+                        log::warn!("/XRefStm pointed to a classical section.");
+                    }
+                }
+            }
+            if let Some(offset) = xref.dict.lookup(b"Prev").num_value() {
+                if !is_aside {
+                    queue.push_back((offset, false));
+                } else {
+                    log::warn!("Ignoring /Prev in a /XRefStm.");
+                }
+            }
+            order.push((offset, xref));
+        }
+        for (offset, xref) in order.into_iter().rev() {
+            let rc = Rc::new(XRefLink { curr: xref, next: next_rc });
+            self.xrefs.insert(offset, Rc::clone(&rc));
+            next_rc = Some(rc);
+        }
     }
 
-    pub fn objects(&mut self) -> impl Iterator<Item = (ObjRef, Result<(ObjRef, Object), Error>)> + '_ {
-        let xrefs = match self.entry {
-            Some(entry) => Self::build_xref_list(&self.xrefs, entry),
-            _ => vec![]
-        };
+    pub fn objects(&mut self) -> impl Iterator<Item = (ObjRef, Result<(Object, impl Locator), Error>)> + '_ {
         let parser = &mut self.parser;
-        xrefs.clone().into_iter().enumerate()
-            .flat_map(|(index, xref)| xref.map.iter().map(move |(num, rec)| (num, rec, index)))
+        self.xrefs.iter()
+            .flat_map(|(_, rc)| rc.curr.map.iter().map(move |(num, rec)| (num, rec, Rc::clone(rc))))
             .filter(|(_, rec, _)| !matches!(rec, Record::Free{..}))
             // all used objects in all xrefs + back-reference to section
-            .map(move |(&num, rec, _index)| match rec {
+            .map(move |(&num, rec, link)| match rec {
                 &Record::Used{gen, offset} => {
                     let objref = ObjRef{num, gen};
-                    (objref, parser.read_obj_at(offset/*, &xrefs[index..]*/))
+                    let res = match parser.read_obj_at(offset) {
+                        Err(err) => Err(err),
+                        Ok((rref, _)) if rref != objref => Err(Error::Parse("object number mismatch")),
+                        Ok((_, obj)) => Ok((obj, link))
+                    };
+                    (objref, res)
                 },
                 _ => todo!("compressed objects")
             })
     }
+}
 
-    fn build_xref_list(xrefs: &BTreeMap<Offset, XRef>, entry: Offset) -> Vec<&XRef> {
-        let mut ret: Vec<&XRef> = Vec::new();
-        let mut next = Some(entry);
-        while let Some(offset) = next.take() {
-            let Some(xref) = xrefs.get(&offset) else { break };
-            if ret.iter().any(|&other| std::ptr::eq(other, xref)) {
-                log::warn!("XRef chain detected, breaking");
-                break;
-            }
-            ret.push(xref);
-            'a: {
-                let XRefType::Table = xref.tpe else { break 'a };
-                let Some(xrefstm) = xref.dict.lookup(b"XRefStm").num_value() else { break 'a };
-                let Some(xref) = xrefs.get(&xrefstm) else { break 'a };
-                if ret.iter().any(|&other| std::ptr::eq(other, xref)) { break 'a; }
-                ret.push(xref);
-            }
-            next = xref.dict.lookup(b"Prev").num_value();
-        }
-        ret
+impl Locator for Rc<XRefLink> {
+    fn locate(&self, objref: &ObjRef) -> Option<Record> {
+        self.curr.locate(objref)
+            .or_else(|| self.next.as_ref()?.locate(objref))
     }
 }
