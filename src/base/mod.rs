@@ -25,6 +25,9 @@ pub use string::*;
 mod xref;
 pub use xref::*;
 
+mod locator;
+pub use locator::*;
+
 mod error;
 pub use error::*;
 
