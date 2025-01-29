@@ -8,11 +8,16 @@ use crate::utils;
 
 use super::bp::ByteProvider;
 use super::op::ObjParser;
-use super::tk::{Tokenizer, Token};
+use super::tk::Tokenizer;
 
 pub struct FileParser<T: BufRead + Seek> {
     reader: T,
     header: Result<Header, Error>,
+}
+
+pub enum Structural {
+    Object(ObjRef, Object),
+    XRefSec(XRef)
 }
 
 impl<T: BufRead + Seek> FileParser<T> {
@@ -30,20 +35,11 @@ impl<T: BufRead + Seek> FileParser<T> {
         Self { reader, header }
     }
 
-    fn seek_to(&mut self, pos: Offset) -> std::io::Result<u64> {
-        self.reader.seek(std::io::SeekFrom::Start(pos))
-    }
-
     fn start(&self) -> Offset {
         match self.header {
             Ok(Header{ start, .. }) => start,
             _ => 0
         }
-    }
-
-    pub fn read_obj_at(&mut self, start: Offset) -> Result<(ObjRef, Object), Error> {
-        self.seek_to(start + self.start())?;
-        self.read_obj_indirect(None)
     }
 
     /*pub fn read_raw(&mut self, start: Offset) -> Result<impl BufRead + use<'_, T>, Error> {
@@ -122,11 +118,14 @@ impl<T: BufRead + Seek> FileParser<T> {
         Ok(sxref)
     }
 
-    fn read_obj_indirect(&mut self, tk: Option<Token>) -> Result<(ObjRef, Object), Error> {
-        let tk = match tk {
-            Some(tk) => tk,
-            None => self.reader.read_token_nonempty()?
-        };
+    fn read_at(&mut self, pos: Offset) -> Result<Structural, Error> {
+        self.reader.seek(std::io::SeekFrom::Start(pos + self.start()))?;
+        let tk = self.reader.read_token_nonempty()?;
+        if tk == b"xref" {
+            self.reader.read_eol()?;
+            let xref = self.read_xref_table()?;
+            return Ok(Structural::XRefSec(xref));
+        }
         let num = utils::parse_int_strict(&tk)
             .ok_or(Error::Parse("invalid object number"))?;
         let tk = self.reader.read_token_nonempty()?;
@@ -139,7 +138,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         let obj = ObjParser::read_obj(&mut self.reader)?;
         match &self.reader.read_token_nonempty()?[..] {
             b"endobj" =>
-                Ok((oref, obj)),
+                Ok(Structural::Object(oref, obj)),
             b"stream" => {
                 let Object::Dict(dict) = obj else {
                     return Err(Error::Parse("endobj not found"))
@@ -155,9 +154,16 @@ impl<T: BufRead + Seek> FileParser<T> {
                 };
                 let offset = self.reader.stream_position()?;
                 let stm = Stream { dict, data: Data::Ref(offset) };
-                Ok((oref, Object::Stream(stm)))
+                Ok(Structural::Object(oref, Object::Stream(stm)))
             },
             _ => Err(Error::Parse("endobj not found"))
+        }
+    }
+
+    pub fn read_obj_at(&mut self, pos: Offset) -> Result<(ObjRef, Object), Error> {
+        match self.read_at(pos)? {
+            Structural::Object(oref, obj) => Ok((oref, obj)),
+            _ => Err(Error::Parse("expected object, found xref section"))
         }
     }
 
@@ -177,14 +183,10 @@ impl<T: BufRead + Seek> FileParser<T> {
         }
     }*/
 
-    pub fn read_xref_at(&mut self, start: Offset) -> Result<XRef, Error> {
-        self.seek_to(start + self.start())?;
-        let tk = self.reader.read_token_nonempty()?;
-        if tk == b"xref" {
-            self.reader.read_eol()?;
-            self.read_xref_table()
-        } else {
-            self.read_xref_stream(tk)
+    pub fn read_xref_at(&mut self, pos: Offset) -> Result<XRef, Error> {
+        match self.read_at(pos)? {
+            Structural::XRefSec(xref) => Ok(xref),
+            Structural::Object(oref, obj) => self.read_xref_stream(oref, obj)
         }
     }
 
@@ -226,8 +228,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         Ok(XRef { tpe: XRefType::Table, map, dict: trailer, size })
     }
 
-    fn read_xref_stream(&mut self, tk: Token) -> Result<XRef, Error> {
-        let (oref, obj) = self.read_obj_indirect(Some(tk))?;
+    fn read_xref_stream(&mut self, oref: ObjRef, obj: Object) -> Result<XRef, Error> {
         let Object::Stream(Stream{dict, data: Data::Ref(offset)}) = obj else {
             return Err(Error::Parse("malfomed xref"))
         };
