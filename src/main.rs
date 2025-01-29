@@ -1,4 +1,5 @@
 use pdflib::reader::Reader;
+use pdflib::base::*;
 
 use std::io::BufReader;
 use std::fs::File;
@@ -14,7 +15,13 @@ fn main() -> Result<(), pdflib::base::Error> {
     let rdr = Reader::new(BufReader::new(File::open(fname)?));
     for (objref, res) in rdr.objects() {
         match res {
-            Ok((obj, _)) => println!("{objref}: {obj}"),
+            Ok((obj, link)) => {
+                println!("{objref}: {obj}");
+                if let Object::Stream(Stream { dict, .. }) = obj {
+                    println!("Length: {}", rdr.resolve(dict.lookup(b"Length"), &link)?);
+                    println!("Filter: {}", rdr.resolve(dict.lookup(b"Filter"), &link)?);
+                }
+            },
             Err(err) => println!("{objref}: {err}")
         }
     }

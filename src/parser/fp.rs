@@ -171,22 +171,6 @@ impl<T: BufRead + Seek> FileParser<T> {
         }
     }
 
-    /*fn resolve(&mut self, obj: &Object, locator: &(impl Locator + ?Sized)) -> Result<Object, Error> {
-        if let Object::Ref(objref) = obj {
-            let Some(offset) = locator.locate_offset(objref) else {
-                return Ok(Object::Null)
-            };
-            let (readref, obj) = self.read_obj_at(offset)?;
-            if &readref == objref {
-                Ok(obj)
-            } else {
-                Err(Error::Parse("object number mismatch"))
-            }
-        } else {
-            Ok(obj.clone())
-        }
-    }*/
-
     pub fn read_xref_at(&mut self, pos: Offset) -> Result<XRef, Error> {
         match self.read_at(pos)? {
             Structural::XRefSec(xref) => Ok(xref),

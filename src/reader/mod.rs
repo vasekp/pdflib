@@ -102,6 +102,22 @@ impl<T: BufRead + Seek> Reader<T> {
                 _ => todo!("compressed objects")
             })
     }
+
+    pub fn resolve(&self, obj: &Object, locator: &impl Locator) -> Result<Object, Error> {
+        if let Object::Ref(objref) = obj {
+            let Some(offset) = locator.locate_offset(objref) else {
+                return Ok(Object::Null)
+            };
+            let (readref, obj) = self.parser.read_obj_at(offset)?;
+            if &readref == objref {
+                Ok(obj)
+            } else {
+                Err(Error::Parse("object number mismatch"))
+            }
+        } else {
+            Ok(obj.to_owned())
+        }
+    }
 }
 
 impl Locator for Rc<XRefLink> {
