@@ -44,10 +44,11 @@ impl<T: BufRead + Seek> FileParser<T> {
         }
     }
 
-    /*pub fn read_raw(&mut self, start: Offset) -> Result<impl BufRead + use<'_, T>, Error> {
-        self.seek_to(start + self.start())?;
-        Ok(&mut self.reader)
-    }*/
+    pub fn read_raw(&self, pos: Offset) -> Result<impl std::io::BufRead + use<'_, T>, Error> {
+        let mut reader = self.reader.borrow_mut();
+        reader.seek(std::io::SeekFrom::Start(pos + self.start()))?;
+        Ok(StreamReader(reader))
+    }
 
     fn find_header(reader: &mut T) -> Result<Header, Error> {
         const BUF_SIZE: usize = 1024;
@@ -127,7 +128,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         let tk = reader.read_token_nonempty()?;
         if tk == b"xref" {
             reader.read_eol()?;
-            let xref = self.read_xref_table(reader.deref_mut())?;
+            let xref = self.read_xref_table(&mut *reader)?;
             return Ok(Structural::XRefSec(xref));
         }
         let num = utils::parse_int_strict(&tk)
@@ -139,7 +140,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         if reader.read_token_nonempty()? != b"obj" {
             return Err(Error::Parse("unexpected token"));
         }
-        let obj = ObjParser::read_obj(reader.deref_mut())?;
+        let obj = ObjParser::read_obj(&mut *reader)?;
         match &reader.read_token_nonempty()?[..] {
             b"endobj" =>
                 Ok(Structural::Object(oref, obj)),
@@ -261,7 +262,8 @@ impl<T: BufRead + Seek> FileParser<T> {
                     _ => Err(Error::Parse("malformed xref stream (/Filter)"))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
-            _ => vec![]
+            Object::Null => vec![],
+            _ => return Err(Error::Parse("malformed xref stream (/Filter)"))
         };
         let codec_in = reader.deref_mut().take(len);
         let mut codec_out = crate::codecs::decode(codec_in, &filters);
@@ -295,6 +297,25 @@ impl<T: BufRead + Seek> FileParser<T> {
             return Err(Error::Parse("malfomed xref stream"));
         }
         Ok(XRef { tpe: XRefType::Stream(oref), map, dict, size })
+    }
+}
+
+
+struct StreamReader<'a, T: BufRead>(std::cell::RefMut<'a, T>);
+
+impl<'a, T: BufRead> std::io::Read for StreamReader<'a, T> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.0.read(buf)
+    }
+}
+
+impl<'a, T: BufRead> BufRead for StreamReader<'a, T> {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        self.0.fill_buf()
+    }
+
+    fn consume(&mut self, amt: usize) {
+        self.0.consume(amt)
     }
 }
 
