@@ -19,7 +19,7 @@ struct XRefLink {
 
 impl<T: BufRead + Seek> Reader<T> {
     pub fn new(source: T) -> Self {
-        let mut parser = FileParser::new(source);
+        let parser = FileParser::new(source);
         let xrefs = BTreeMap::new();
         let entry = match parser.entrypoint() {
             Ok(offset) => Some(offset),
@@ -83,8 +83,8 @@ impl<T: BufRead + Seek> Reader<T> {
         }
     }
 
-    pub fn objects(&mut self) -> impl Iterator<Item = (ObjRef, Result<(Object, impl Locator), Error>)> + '_ {
-        let parser = &mut self.parser;
+    pub fn objects(&self) -> impl Iterator<Item = (ObjRef, Result<(Object, impl Locator), Error>)> + '_ {
+        let parser = &self.parser;
         self.xrefs.iter()
             .flat_map(|(_, rc)| rc.curr.map.iter().map(move |(num, rec)| (num, rec, Rc::clone(rc))))
             .filter(|(_, rec, _)| !matches!(rec, Record::Free{..}))
