@@ -118,6 +118,22 @@ impl<T: BufRead + Seek> Reader<T> {
             Ok(obj.to_owned())
         }
     }
+
+    pub fn resolve_deep(&self, obj: &Object, locator: &impl Locator) -> Result<Object, Error> {
+        Ok(match self.resolve(obj, locator)? {
+            Object::Array(arr) =>
+                Object::Array(arr.into_iter()
+                    .map(|obj| self.resolve(&obj, locator))
+                    .collect::<Result<Vec<_>, _>>()?),
+            Object::Dict(dict) =>
+                Object::Dict(Dict(dict.0.into_iter()
+                    .map(|(name, obj)| -> Result<(Name, Object), Error> {
+                        Ok((name, self.resolve(&obj, locator)?))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?)),
+            obj => obj
+        })
+    }
 }
 
 impl Locator for Rc<XRefLink> {

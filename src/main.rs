@@ -18,8 +18,8 @@ fn main() -> Result<(), pdflib::base::Error> {
             Ok((obj, link)) => {
                 println!("{objref}: {obj}");
                 if let Object::Stream(Stream { dict, .. }) = obj {
-                    println!("Length: {}", rdr.resolve(dict.lookup(b"Length"), &link)?);
-                    println!("Filter: {}", rdr.resolve(dict.lookup(b"Filter"), &link)?);
+                    println!("Length: {}", rdr.resolve_deep(dict.lookup(b"Length"), &link)?);
+                    println!("Filter: {}", rdr.resolve_deep(dict.lookup(b"Filter"), &link)?);
                 }
             },
             Err(err) => println!("{objref}: {err}")
