@@ -135,7 +135,7 @@ impl<T: BufRead + Seek> Reader<T> {
         })
     }
 
-    pub fn read_stream_data<L>(&self, obj: &Stream, locator: &L) -> Result<impl std::io::BufRead + use<'_, T, L>, Error>
+    pub fn read_stream_data<L>(&self, obj: &Stream, locator: &L) -> Result<Box<dyn std::io::BufRead + '_>, Error>
         where L: Locator
     {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };

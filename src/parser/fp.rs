@@ -183,11 +183,13 @@ impl<T: BufRead + Seek> FileParser<T> {
         let mut map = BTreeMap::new();
         let err = || Error::Parse("malformed xref table");
         loop {
-            let line = reader.read_line_excl()?.trim_ascii_end().to_owned();
-            if line == b"trailer" { break; }
-            let index = line.iter().position(|c| *c == b' ').ok_or_else(err)?;
-            let start = utils::parse_num::<u64>(&line[..index]).ok_or_else(err)?;
-            let size = utils::parse_num::<u64>(&line[(index+1)..]).ok_or_else(err)?;
+            let tk = reader.read_token_nonempty()?;
+            if tk == b"trailer" { break; }
+            let start = utils::parse_num::<u64>(&tk).ok_or_else(err)?;
+            let size = utils::parse_num::<u64>(&reader.read_token_nonempty()?).ok_or_else(err)?;
+            if reader.read_token()? != b" " { // skip after EOL (successive whitespace counts as a single space)
+                return Err(err());
+            }
             let mut line = [0u8; 20];
             for num in start..(start+size) {
                 reader.read_exact(&mut line)?;
