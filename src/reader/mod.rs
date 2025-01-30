@@ -87,9 +87,8 @@ impl<T: BufRead + Seek> Reader<T> {
         let parser = &self.parser;
         self.xrefs.iter()
             .flat_map(|(_, rc)| rc.curr.map.iter().map(move |(num, rec)| (num, rec, Rc::clone(rc))))
-            .filter(|(_, rec, _)| !matches!(rec, Record::Free{..}))
             // all used objects in all xrefs + back-reference to section
-            .map(move |(&num, rec, link)| match rec {
+            .flat_map(move |(&num, rec, link)| match rec {
                 &Record::Used{gen, offset} => {
                     let objref = ObjRef{num, gen};
                     let res = match parser.read_obj_at(offset) {
@@ -97,9 +96,13 @@ impl<T: BufRead + Seek> Reader<T> {
                         Ok((rref, _)) if rref != objref => Err(Error::Parse("object number mismatch")),
                         Ok((_, obj)) => Ok((obj, link))
                     };
-                    (objref, res)
+                    Some((objref, res))
                 },
-                _ => todo!("compressed objects")
+                &Record::Compr{..} => {
+                    log::warn!("Compressed objects not yet implemented ({num} 0).");
+                    None
+                },
+                &Record::Free{..} => None
             })
     }
 
