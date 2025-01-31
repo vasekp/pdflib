@@ -46,7 +46,7 @@ impl<T: BufRead + Seek> FileParser<T> {
 
     pub fn read_raw(&self, pos: Offset) -> Result<impl std::io::BufRead + use<'_, T>, Error> {
         let mut reader = self.reader.borrow_mut();
-        reader.seek(std::io::SeekFrom::Start(pos + self.start()))?;
+        reader.seek(std::io::SeekFrom::Start(pos))?;
         Ok(StreamReader(reader))
     }
 
