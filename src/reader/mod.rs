@@ -103,9 +103,9 @@ impl<T: BufRead + Seek> Reader<T> {
                     };
                     Some((objref, res))
                 },
-                Record::Compr{num: within, index} => {
+                Record::Compr{num_within, index} => {
                     let objref = ObjRef{num, gen: 0};
-                    let res = match self.read_compressed(within, index, &link) {
+                    let res = match self.read_compressed(num_within, index, &link) {
                         Err(err) => Err(err),
                         Ok((rref, _)) if rref != objref => Err(Error::Parse("object number mismatch")),
                         Ok((_, obj)) => Ok((obj, link))
@@ -129,8 +129,8 @@ impl<T: BufRead + Seek> Reader<T> {
                     Err(Error::Parse("object number mismatch"))
                 }
             },
-            Some(Record::Compr { num, index }) => {
-                let (readref, obj) = self.read_compressed(num, index, locator)?;
+            Some(Record::Compr { num_within, index }) => {
+                let (readref, obj) = self.read_compressed(num_within, index, locator)?;
                 if &readref == objref {
                     Ok(obj)
                 } else {
