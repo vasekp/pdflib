@@ -20,15 +20,33 @@ fn main() -> Result<(), pdflib::base::Error> {
                 println!("{objref}: {obj}");
                 if let Object::Stream(stm) = obj {
                     let data = rdr.read_stream_data(&stm, &link)?;
-                    println!("-----");
+                    println!("--v--v--v--");
+                    let mut read = 0;
+                    let mut special = 0;
+                    let mut need_nl = true;
                     for c in data.bytes() {
                         let c = c?;
                         match c {
-                            0x20..=0x7E | b'\n' => print!("{}", c as char),
-                            _ => print!("\x1B[7m<{:02x}>\x1B[0m", c)
+                            0x20..=0x7E | b'\n' => {
+                                print!("{}", c as char);
+                                read += 1;
+                                need_nl = c != b'\n';
+                            },
+                            _ => {
+                                print!("\x1B[7m<{:02x}>\x1B[0m", c);
+                                special += 1;
+                            }
+                        }
+                        if read > 1000 || special > 10 {
+                            println!("...");
+                            need_nl = false;
+                            break;
                         }
                     }
-                    println!("\n-----\n");
+                    if need_nl {
+                        println!();
+                    }
+                    println!("--^--^--^--");
                 }
             },
             Err(err) => println!("{objref}: {err}")

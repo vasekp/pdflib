@@ -37,9 +37,6 @@ impl<T: BufRead + Seek> Reader<T> {
         if let Some(offset) = &reader.entry {
             reader.build_xref_list(*offset);
         }
-        for (offset, link) in &reader.xrefs {
-            println!("{offset}: {:?}\n", link.curr);
-        }
         reader
     }
 

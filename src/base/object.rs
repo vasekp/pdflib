@@ -54,7 +54,7 @@ impl Display for Object {
                 f.write_str("]")
             },
             Object::Dict(dict) => write!(f, "{}", dict),
-            Object::Stream(stm) => write!(f, "{} stream...", stm.dict),
+            Object::Stream(stm) => write!(f, "{} [stream]", stm.dict),
             Object::Ref(ObjRef{num, gen}) => write!(f, "{num} {gen} R"),
             Object::Null => f.write_str("null")
         }
