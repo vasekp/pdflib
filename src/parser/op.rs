@@ -346,6 +346,7 @@ are the same.) (These two strings are the same.)");
         let mut parser = ObjParser::from("[549 3.14 false (Ralph) /SomeName] [ %\n ] [false%]");
         assert_eq!(parser.read_obj_inner().unwrap(), Object::Array(vec![
                 Object::Number(Number::Int(549)),
+                #[allow(clippy::approx_constant)]
                 Object::Number(Number::Real(3.14)),
                 Object::Bool(false),
                 Object::new_string("Ralph"),

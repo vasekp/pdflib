@@ -303,13 +303,13 @@ impl<T: BufRead + Seek> FileParser<T> {
 
 struct StreamReader<'a, T: BufRead>(std::cell::RefMut<'a, T>);
 
-impl<'a, T: BufRead> std::io::Read for StreamReader<'a, T> {
+impl<T: BufRead> std::io::Read for StreamReader<'_, T> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         self.0.read(buf)
     }
 }
 
-impl<'a, T: BufRead> BufRead for StreamReader<'a, T> {
+impl<T: BufRead> BufRead for StreamReader<'_, T> {
     fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
         self.0.fill_buf()
     }

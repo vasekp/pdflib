@@ -89,6 +89,7 @@ mod tests {
         assert_eq!(format!("{}", Object::new_name(" A#/$*(%\n")), "/#20A#23#2F$*#28#25#0A");
         assert_eq!(format!("{}", Object::Array(vec![
                 Object::Number(Number::Int(549)),
+                #[allow(clippy::approx_constant)]
                 Object::Number(Number::Real(3.14)),
                 Object::Bool(false),
                 Object::new_string("Ralph"),
