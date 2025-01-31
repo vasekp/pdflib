@@ -1,5 +1,5 @@
 use std::io::*;
-use crate::parser::tk::Tokenizer;
+use crate::parser::Tokenizer;
 use crate::utils;
 
 pub fn decode<R: BufRead>(input: R) -> BufReader<AsciiHexDecoder<R>> {

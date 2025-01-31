@@ -1,16 +1,7 @@
 use super::*;
-use super::types::*;
 
 pub trait Locator {
     fn locate(&self, objref: &ObjRef) -> Option<Record>;
-
-    fn locate_offset(&self, objref: &ObjRef) -> Option<Offset> {
-        if let Some(Record::Used{offset, ..}) = self.locate(objref) {
-            Some(offset)
-        } else {
-            None
-        }
-    }
 }
 
 impl Locator for () {
