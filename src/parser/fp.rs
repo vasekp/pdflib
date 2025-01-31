@@ -7,6 +7,7 @@ use std::ops::DerefMut;
 use crate::base::*;
 use crate::base::types::*;
 use crate::utils;
+use crate::codecs;
 
 use super::bp::ByteProvider;
 use super::op::ObjParser;
@@ -254,19 +255,9 @@ impl<T: BufRead + Seek> FileParser<T> {
         let len = dict.lookup(b"Length")
             .num_value()
             .ok_or(Error::Parse("malfomed xref stream (/Length)"))?;
-        let filters = match dict.lookup(b"Filter") {
-            Object::Name(name) => vec![name.to_owned()],
-            Object::Array(vec) => vec.iter()
-                .map(|obj| match obj {
-                    Object::Name(name) => Ok(name.to_owned()),
-                    _ => Err(Error::Parse("malformed xref stream (/Filter)"))
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-            Object::Null => vec![],
-            _ => return Err(Error::Parse("malformed xref stream (/Filter)"))
-        };
+        let filters = codecs::to_filters(dict.lookup(b"Filter"))?;
         let codec_in = reader.deref_mut().take(len);
-        let mut codec_out = crate::codecs::decode(codec_in, &filters);
+        let mut codec_out = codecs::decode(codec_in, &filters);
         let mut read = |w| -> Result<u64, Error> {
             let mut dec_buf = [0; 8];
             codec_out.read_exact(&mut dec_buf[(8-w)..8])?;

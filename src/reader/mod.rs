@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::base::*;
 use crate::base::types::*;
 use crate::parser::FileParser;
+use crate::codecs;
 
 pub struct Reader<T: BufRead + Seek> {
     parser: FileParser<T>,
@@ -143,20 +144,10 @@ impl<T: BufRead + Seek> Reader<T> {
     {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
         let len = self.resolve(obj.dict.lookup(b"Length"), locator)?.num_value().unwrap(); // TODO
-        let filters = match self.resolve_deep(obj.dict.lookup(b"Filter"), locator)? { // TODO separate
-            Object::Name(name) => vec![name.to_owned()],
-            Object::Array(vec) => vec.iter()
-                .map(|obj| match obj {
-                    Object::Name(name) => Ok(name.to_owned()),
-                    _ => Err(Error::Parse("malformed /Filter"))
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-            Object::Null => vec![],
-            _ => return Err(Error::Parse("malformed /Filter"))
-        };
+        let filters = self.resolve_deep(obj.dict.lookup(b"Filter"), locator)?;
         let reader = self.parser.read_raw(offset)?;
         let codec_in = std::io::Read::take(reader, len);
-        let codec_out = crate::codecs::decode(codec_in, &filters);
+        let codec_out = codecs::decode(codec_in, &codecs::to_filters(&filters)?);
         Ok(codec_out)
     }
 }
