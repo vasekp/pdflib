@@ -8,6 +8,9 @@ use crate::parser::{FileParser, ObjParser};
 use crate::codecs;
 use crate::utils;
 
+mod bufskip;
+use bufskip::*;
+
 pub struct Reader<T: BufRead + Seek> {
     parser: FileParser<T>,
     xrefs: BTreeMap<Offset, Rc<XRefLink>>,
@@ -174,36 +177,8 @@ impl<T: BufRead + Seek> Reader<T> {
             .map(|tk| utils::parse_num::<Offset>(&tk).ok_or(Error::Parse("malformed object stream header")))
             .transpose()?;
         // Drain rest of header to get to start of objects.
-        loop {
-            let avail = match header.fill_buf() {
-                Ok(n) => n.len(),
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e.into())
-            };
-            if avail == 0 {
-                break;
-            }
-            header.consume(avail);
-        }
-        // Skip first `offset` bytes.
-        let mut rem = offset.try_into().expect("Should fit into u64.");
-        loop {
-            let avail = match reader.fill_buf() {
-                Ok(n) => n.len(),
-                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e.into())
-            };
-            if avail == 0 {
-                break;
-            }
-            if avail < rem {
-                reader.consume(avail);
-                rem -= avail;
-            } else {
-                reader.consume(rem);
-                break;
-            }
-        }
+        header.skip_to_end()?;
+        reader.skip_bytes(offset.try_into().expect("Should fit into u64."))?;
         let obj = if let Some(next_offset) = next_offset {
             ObjParser::read_obj(&mut reader.take(next_offset - offset))
         } else {
