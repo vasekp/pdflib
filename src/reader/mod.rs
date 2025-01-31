@@ -89,28 +89,19 @@ impl<T: BufRead + Seek> Reader<T> {
     }
 
     pub fn objects(&self) -> impl Iterator<Item = (ObjRef, Result<(Object, impl Locator), Error>)> + '_ {
-        let parser = &self.parser;
         self.xrefs.iter()
             .flat_map(|(_, rc)| rc.curr.map.iter().map(move |(num, rec)| (num, rec, Rc::clone(rc))))
             // all used objects in all xrefs + back-reference to section
             .flat_map(move |(&num, rec, link)| match *rec {
                 Record::Used{gen, offset} => {
                     let objref = ObjRef{num, gen};
-                    let res = match parser.read_obj_at(offset) {
-                        Err(err) => Err(err),
-                        Ok((rref, _)) if rref != objref => Err(Error::Parse("object number mismatch")),
-                        Ok((_, obj)) => Ok((obj, link))
-                    };
-                    Some((objref, res))
+                    Some((objref, self.read_uncompressed(offset, &objref)
+                            .map(|obj| (obj, link))))
                 },
                 Record::Compr{num_within, index} => {
                     let objref = ObjRef{num, gen: 0};
-                    let res = match self.read_compressed(num_within, index, &link) {
-                        Err(err) => Err(err),
-                        Ok((rref, _)) if rref != objref => Err(Error::Parse("object number mismatch")),
-                        Ok((_, obj)) => Ok((obj, link))
-                    };
-                    Some((objref, res))
+                    Some((objref, self.read_compressed(num_within, index, &link, &objref)
+                            .map(|obj| (obj, link))))
                 },
                 Record::Free{..} => None
             })
@@ -121,43 +112,34 @@ impl<T: BufRead + Seek> Reader<T> {
             return Ok(obj.to_owned());
         };
         match locator.locate(objref) {
-            Some(Record::Used { offset, .. }) => {
-                let (readref, obj) = self.parser.read_obj_at(offset)?;
-                if &readref == objref {
-                    Ok(obj)
-                } else {
-                    Err(Error::Parse("object number mismatch"))
-                }
-            },
-            Some(Record::Compr { num_within, index }) => {
-                let (readref, obj) = self.read_compressed(num_within, index, locator)?;
-                if &readref == objref {
-                    Ok(obj)
-                } else {
-                    Err(Error::Parse("object number mismatch"))
-                }
-            },
+            Some(Record::Used { offset, .. }) => self.read_uncompressed(offset, objref),
+            Some(Record::Compr { num_within, index }) => self.read_compressed(num_within, index, locator, objref),
             _ => Ok(Object::Null)
         }
     }
 
-    fn read_compressed(&self, num_within: ObjNum, index: ObjGen, locator: &impl Locator) -> Result<(ObjRef, Object), Error> {
+    fn read_uncompressed(&self, offset: Offset, oref_expd: &ObjRef) -> Result<Object, Error> {
+        let (oref, obj) = self.parser.read_obj_at(offset)?;
+        if &oref == oref_expd {
+            Ok(obj)
+        } else {
+            Err(Error::Parse("object number mismatch"))
+        }
+    }
+
+    fn read_compressed(&self, num_within: ObjNum, index: ObjGen, locator: &impl Locator, oref_expd: &ObjRef) -> Result<Object, Error> {
         let oref_ostm = ObjRef { num: num_within, gen: 0 };
         let Some(Record::Used { offset, gen: 0 }) = locator.locate(&oref_ostm) else {
             return Err(Error::Parse("object stream not located"));
         };
-        let (rref, obj) = self.parser.read_obj_at(offset)?;
-        if rref != oref_ostm {
-            return Err(Error::Parse("object number mismatch"));
-        };
-        let Object::Stream(stm) = obj else {
+        let Object::Stream(stm) = self.read_uncompressed(offset, &oref_ostm)? else {
             return Err(Error::Parse("object stream not found"));
         };
         // FIXME: /Type = /ObjStm
         let count = stm.dict.lookup(b"N").num_value()
             .ok_or(Error::Parse("malformed object stream (/N)"))?;
         if index >= count {
-            return Ok((ObjRef { num: 0, gen: 0 }, Object::Null)); // FIXME: placeholder object number!
+            return Err(Error::Parse("index >= /N requested from object stream"));
         }
         let first = stm.dict.lookup(b"First").num_value()
             .ok_or(Error::Parse("malformed object stream (/First)"))?;
@@ -168,10 +150,13 @@ impl<T: BufRead + Seek> Reader<T> {
             header.read_token()?;
             header.read_token()?;
         }
-        let rnum = utils::parse_num::<ObjNum>(&header.read_token()?)
+        let num = utils::parse_num::<ObjNum>(&header.read_token()?)
             .ok_or(Error::Parse("malformed object stream header"))?;
         let offset = utils::parse_num::<Offset>(&header.read_token()?)
             .ok_or(Error::Parse("malformed object stream header"))?;
+        if &(ObjRef { num, gen: 0 }) != oref_expd {
+            return Err(Error::Parse("object number mismatch"));
+        }
         let _ = header.read_token();
         let next_offset = header.read_token().ok()
             .map(|tk| utils::parse_num::<Offset>(&tk).ok_or(Error::Parse("malformed object stream header")))
@@ -184,7 +169,7 @@ impl<T: BufRead + Seek> Reader<T> {
         } else {
             ObjParser::read_obj(&mut reader)
         }?;
-        Ok((ObjRef { num: rnum, gen: 0 }, obj))
+        Ok(obj)
     }
 
     pub fn resolve_deep(&self, obj: &Object, locator: &impl Locator) -> Result<Object, Error> {
