@@ -6,6 +6,7 @@ pub type Token = Vec<u8>;
 
 pub trait Tokenizer: ByteProvider {
     fn read_token(&mut self) -> std::io::Result<Token> {
+        self.skip_ws()?;
         let c = self.next_or_eof()?;
         match CharClass::of(c) {
             CharClass::Delim => {
@@ -18,10 +19,6 @@ pub trait Tokenizer: ByteProvider {
                     Ok(vec![c])
                 }
             },
-            CharClass::Space => {
-                while self.next_if(|c| CharClass::of(c) == CharClass::Space).is_some() { }
-                Ok(vec![b' '])
-            },
             CharClass::Reg => {
                 let mut ret = Vec::new();
                 ret.push(c);
@@ -29,14 +26,8 @@ pub trait Tokenizer: ByteProvider {
                     ret.push(r);
                 }
                 Ok(ret)
-            }
-        }
-    }
-
-    fn read_token_nonempty(&mut self) -> std::io::Result<Token> {
-        loop {
-            let tk = self.read_token()?;
-            if tk != b" " { return Ok(tk); }
+            },
+            CharClass::Space => unreachable!()
         }
     }
 
@@ -45,6 +36,15 @@ pub trait Tokenizer: ByteProvider {
             (None, None) => Err(Error::Parse("EOL expected but not found")),
             _ => Ok(())
         }
+    }
+
+    fn skip_ws(&mut self) -> std::io::Result<()> {
+        while let Some(c) = self.next_if(|c| CharClass::of(c) == CharClass::Space || c == b'%') {
+            if c == b'%' {
+                while self.next_if(|c| c != b'\n' && c != b'\r').is_some() { }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -60,26 +60,15 @@ mod tests {
 
         let mut tkn = Cursor::new("abc  <<g,%k\r\nn");
         assert_eq!(tkn.read_token().unwrap(), b"abc");
-        assert_eq!(tkn.read_token().unwrap(), b" ");
         assert_eq!(tkn.read_token().unwrap(), b"<<");
         assert_eq!(tkn.read_token().unwrap(), b"g,");
-        assert_eq!(tkn.read_token().unwrap(), b" ");
-        assert_eq!(tkn.read_token().unwrap(), b" ");
         assert_eq!(tkn.read_token().unwrap(), b"n");
         assert!(tkn.read_token().is_err());
 
-        let mut tkn = Cursor::new("A%1\rB%2\nC");
+        let mut tkn = Cursor::new("A %1\r B%2\n\rC");
         assert_eq!(tkn.read_token().unwrap(), b"A");
-        assert_eq!(tkn.read_token().unwrap(), b" ");
-        assert_eq!(tkn.read_token().unwrap(), b" ");
         assert_eq!(tkn.read_token().unwrap(), b"B");
-        assert_eq!(tkn.read_token().unwrap(), b" ");
-        assert_eq!(tkn.read_token().unwrap(), b" ");
         assert_eq!(tkn.read_token().unwrap(), b"C");
-
-        let mut tkn = Cursor::new("A%1\r %2\nB");
-        assert_eq!(tkn.read_token_nonempty().unwrap(), b"A");
-        assert_eq!(tkn.read_token_nonempty().unwrap(), b"B");
 
         let mut tkn = Cursor::new("a\r\nb\nc\rd \ne\n\r");
         assert_eq!(tkn.read_token().unwrap(), b"a");
@@ -90,7 +79,6 @@ mod tests {
         assert!(tkn.read_eol().is_ok());
         assert_eq!(tkn.read_token().unwrap(), b"d");
         assert!(tkn.read_eol().is_err());
-        assert_eq!(tkn.read_token().unwrap(), b" ");
         assert_eq!(tkn.read_token().unwrap(), b"e");
         assert!(tkn.read_eol().is_ok());
         assert!(tkn.read_eol().is_ok());

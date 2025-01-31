@@ -125,7 +125,7 @@ impl<T: BufRead + Seek> FileParser<T> {
     fn read_at(&self, pos: Offset) -> Result<Structural, Error> {
         let mut reader = self.reader.borrow_mut();
         reader.seek(std::io::SeekFrom::Start(pos + self.start()))?;
-        let tk = reader.read_token_nonempty()?;
+        let tk = reader.read_token()?;
         if tk == b"xref" {
             reader.read_eol()?;
             let xref = self.read_xref_table(&mut *reader)?;
@@ -133,15 +133,15 @@ impl<T: BufRead + Seek> FileParser<T> {
         }
         let num = utils::parse_int_strict(&tk)
             .ok_or(Error::Parse("invalid object number"))?;
-        let tk = reader.read_token_nonempty()?;
+        let tk = reader.read_token()?;
         let gen = utils::parse_int_strict(&tk)
             .ok_or(Error::Parse("invalid generation number"))?;
         let oref = ObjRef{num, gen};
-        if reader.read_token_nonempty()? != b"obj" {
+        if reader.read_token()? != b"obj" {
             return Err(Error::Parse("unexpected token"));
         }
         let obj = ObjParser::read_obj(&mut *reader)?;
-        match &reader.read_token_nonempty()?[..] {
+        match &reader.read_token()?[..] {
             b"endobj" =>
                 Ok(Structural::Object(oref, obj)),
             b"stream" => {
@@ -183,13 +183,11 @@ impl<T: BufRead + Seek> FileParser<T> {
         let mut map = BTreeMap::new();
         let err = || Error::Parse("malformed xref table");
         loop {
-            let tk = reader.read_token_nonempty()?;
+            let tk = reader.read_token()?;
             if tk == b"trailer" { break; }
             let start = utils::parse_num::<u64>(&tk).ok_or_else(err)?;
-            let size = utils::parse_num::<u64>(&reader.read_token_nonempty()?).ok_or_else(err)?;
-            if reader.read_token()? != b" " { // skip after EOL (successive whitespace counts as a single space)
-                return Err(err());
-            }
+            let size = utils::parse_num::<u64>(&reader.read_token()?).ok_or_else(err)?;
+            reader.skip_ws()?;
             let mut line = [0u8; 20];
             for num in start..(start+size) {
                 reader.read_exact(&mut line)?;

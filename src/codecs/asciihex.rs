@@ -25,7 +25,7 @@ impl<R: BufRead> AsciiHexDecoder<R> {
         if self.done { return Ok(None); }
         let mut buf = [0];
         if self.rem.read(&mut buf)? == 0 {
-            self.rem = match self.reader.read_token_nonempty() {
+            self.rem = match self.reader.read_token() {
                 Ok(tk) => Cursor::new(tk),
                 Err(err) if err.kind() == ErrorKind::UnexpectedEof
                     => { self.done = true; return Ok(None); },

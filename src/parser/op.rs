@@ -20,13 +20,13 @@ impl<T: BufRead> ObjParser<T> {
     fn next_token(&mut self) -> Result<Token, Error> {
         match self.stack.pop() {
             Some(tk) => Ok(tk),
-            None => self.reader.read_token_nonempty()
+            None => self.reader.read_token()
                 .map_err(Error::from)
         }
     }
 
     pub fn read_obj(reader: &mut T) -> Result<Object, Error> {
-        let tk = reader.read_token_nonempty()?;
+        let tk = reader.read_token()?;
         if matches!(tk[..], [b'0'..=b'9' | b'+' | b'-' | b'.', ..]) {
             tk.try_into().map(Object::Number)
         } else {
