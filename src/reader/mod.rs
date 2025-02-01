@@ -104,7 +104,7 @@ impl<T: BufRead + Seek> Reader<T> {
             })
     }
 
-    pub fn resolve(&self, obj: &Object, locator: &impl Locator) -> Result<Object, Error> {
+    pub fn resolve(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
         let Object::Ref(objref) = obj else {
             return Ok(obj.to_owned());
         };
@@ -124,7 +124,7 @@ impl<T: BufRead + Seek> Reader<T> {
         }
     }
 
-    fn read_compressed(&self, num_within: ObjNum, index: ObjGen, locator: &impl Locator, oref_expd: &ObjRef) -> Result<Object, Error> {
+    fn read_compressed(&self, num_within: ObjNum, index: ObjGen, locator: &dyn Locator, oref_expd: &ObjRef) -> Result<Object, Error> {
         let oref_ostm = ObjRef { num: num_within, gen: 0 };
         let Some(Record::Used { offset, gen: 0 }) = locator.locate(&oref_ostm) else {
             return Err(Error::Parse("object stream not located"));
@@ -140,7 +140,7 @@ impl<T: BufRead + Seek> Reader<T> {
         }
         let first = stm.dict.lookup(b"First").num_value()
             .ok_or(Error::Parse("malformed object stream (/First)"))?;
-        let mut reader = self.read_stream_data(&stm, locator)?;
+        let mut reader = self.read_stream_data(&stm, &Uncompressed(locator))?;
         let mut header = (&mut reader).take(first);
         use crate::parser::Tokenizer;
         for _ in 0..index {
@@ -169,7 +169,7 @@ impl<T: BufRead + Seek> Reader<T> {
         Ok(obj)
     }
 
-    pub fn resolve_deep(&self, obj: &Object, locator: &impl Locator) -> Result<Object, Error> {
+    pub fn resolve_deep(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
         Ok(match self.resolve(obj, locator)? {
             Object::Array(arr) =>
                 Object::Array(arr.into_iter()
@@ -185,8 +185,7 @@ impl<T: BufRead + Seek> Reader<T> {
         })
     }
 
-    pub fn read_stream_data<L>(&self, obj: &Stream, locator: &L) -> Result<Box<dyn BufRead + '_>, Error>
-        where L: Locator
+    pub fn read_stream_data(&self, obj: &Stream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error>
     {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
         let len = self.resolve(obj.dict.lookup(b"Length"), locator)?.num_value().unwrap(); // TODO
@@ -202,5 +201,19 @@ impl Locator for Rc<XRefLink> {
     fn locate(&self, objref: &ObjRef) -> Option<Record> {
         self.curr.locate(objref)
             .or_else(|| self.next.as_ref()?.locate(objref))
+    }
+}
+
+struct Uncompressed<'a, T: Locator + ?Sized>(&'a T);
+
+impl<T: Locator + ?Sized> Locator for Uncompressed<'_, T> {
+    fn locate(&self, objref: &ObjRef) -> Option<Record> {
+        let rec = self.0.locate(objref);
+        if matches!(rec, Some(Record::Compr{..})) {
+            log::warn!("Object {objref} should be uncompressed.");
+            Some(Record::default())
+        } else {
+            rec
+        }
     }
 }
