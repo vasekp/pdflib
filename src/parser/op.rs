@@ -129,6 +129,15 @@ impl<T: BufRead> ObjParser<T> {
         loop {
             let tk = self.next_token()?;
             if tk == b">" { break; }
+            if tk == b">>" {
+                let tk2 = self.next_token()?;
+                if tk2 == b">" {
+                    self.stack.push(tk);
+                    break;
+                } else {
+                    return Err(Error::Parse("malformed hex string"));
+                }
+            }
             for c in tk {
                 let dig = utils::hex_value(c).ok_or(Error::Parse("malformed hex string"))?;
                 match msd {
