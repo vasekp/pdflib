@@ -256,8 +256,13 @@ impl<T: BufRead + Seek> FileParser<T> {
             .num_value()
             .ok_or(Error::Parse("malfomed xref stream (/Length)"))?;
         let filters = codecs::to_filters(dict.lookup(b"Filter"))?;
+        let params = match dict.lookup(b"DecodeParms") {
+            Object::Dict(dict) => Some(dict),
+            &Object::Null => None,
+            _ => return Err(Error::Parse("malformed xref stream (/DecodeParms)"))
+        };
         let codec_in = reader.deref_mut().take(len);
-        let mut codec_out = codecs::decode(codec_in, &filters);
+        let mut codec_out = codecs::decode(codec_in, &filters, params);
         let mut read = |w| -> Result<u64, Error> {
             let mut dec_buf = [0; 8];
             codec_out.read_exact(&mut dec_buf[(8-w)..8])?;

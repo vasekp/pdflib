@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use super::name::Name;
 use super::object::Object;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 pub struct Dict(pub Vec<(Name, Object)>);
 
 impl Dict {

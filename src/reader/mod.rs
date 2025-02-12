@@ -190,9 +190,14 @@ impl<T: BufRead + Seek> Reader<T> {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
         let len = self.resolve(obj.dict.lookup(b"Length"), locator)?.num_value().unwrap(); // TODO
         let filters = self.resolve_deep(obj.dict.lookup(b"Filter"), locator)?;
+        let params = match obj.dict.lookup(b"DecodeParms") {
+            Object::Dict(dict) => Some(dict),
+            &Object::Null => None,
+            _ => return Err(Error::Parse("malformed /DecodeParms"))
+        };
         let reader = self.parser.read_raw(offset)?;
         let codec_in = reader.take(len);
-        let codec_out = codecs::decode(codec_in, &codecs::to_filters(&filters)?);
+        let codec_out = codecs::decode(codec_in, &codecs::to_filters(&filters)?, params);
         Ok(codec_out)
     }
 }
