@@ -3,13 +3,17 @@ mod asciihex;
 
 use crate::base::*;
 use std::io::BufRead;
+use log::*;
 
 pub fn decode<'a, R: BufRead + 'a>(input: R, filter: &[Name], params: Option<&Dict>) -> Box<dyn BufRead + 'a> {
     match filter {
         [] => Box::new(input),
         [name] if name == b"FlateDecode" => flate::decode(input, params.unwrap_or(&Dict::default())),
         [name] if name == b"ASCIIHexDecode" => Box::new(asciihex::decode(input)),
-        _ => unimplemented!("codec: {:?}", filter)
+        _ => {
+            error!("skipping unimplemented filter: {:?}", filter);
+            Box::new(input)
+        }
     }
 }
 
