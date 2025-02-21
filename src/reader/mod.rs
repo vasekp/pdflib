@@ -124,7 +124,7 @@ impl<T: BufRead + Seek> Reader<T> {
         }
     }
 
-    fn read_compressed(&self, num_within: ObjNum, index: ObjGen, locator: &dyn Locator, oref_expd: &ObjRef) -> Result<Object, Error> {
+    fn read_compressed(&self, num_within: ObjNum, index: ObjIndex, locator: &dyn Locator, oref_expd: &ObjRef) -> Result<Object, Error> {
         let oref_ostm = ObjRef { num: num_within, gen: 0 };
         let Some(Record::Used { offset, gen: 0 }) = locator.locate(&oref_ostm) else {
             return Err(Error::Parse("object stream not located"));

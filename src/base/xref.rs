@@ -23,7 +23,7 @@ pub enum XRefType {
 #[derive(Debug, Clone, Copy)]
 pub enum Record {
     Used { gen: ObjGen, offset: Offset },
-    Compr { num_within: ObjNum, index: ObjGen },
+    Compr { num_within: ObjNum, index: ObjIndex },
     Free { gen: ObjGen, next: ObjNum }
 }
 

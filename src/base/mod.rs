@@ -1,6 +1,7 @@
 pub mod types {
     pub type ObjNum = u64;
     pub type ObjGen = u16;
+    pub type ObjIndex = ObjGen;
     pub type Offset = u64;
 }
 
