@@ -1,6 +1,9 @@
 use std::io::{Read, BufRead, Seek};
 use std::collections::{BTreeMap, VecDeque};
+use std::collections::btree_map::Entry;
 use std::rc::Rc;
+use std::cell::{RefCell, Ref};
+use std::ops::Deref;
 
 use crate::base::*;
 use crate::base::types::*;
@@ -14,13 +17,16 @@ use bufskip::*;
 pub struct Reader<T: BufRead + Seek> {
     parser: FileParser<T>,
     xrefs: BTreeMap<Offset, Rc<XRefLink>>,
-    entry: Option<Offset>
+    entry: Option<Offset>,
+    objstms: RefCell<BTreeMap<Offset, Result<ObjStm, Error>>>,
 }
 
 struct XRefLink {
     curr: XRef,
     next: Option<Rc<XRefLink>>
 }
+
+type ObjStm = Vec<(ObjNum, Object)>;
 
 impl<T: BufRead + Seek> Reader<T> {
     pub fn new(source: T) -> Self {
@@ -33,7 +39,7 @@ impl<T: BufRead + Seek> Reader<T> {
                 None
             }
         };
-        let mut reader = Reader { parser, xrefs, entry };
+        let mut reader = Reader { parser, xrefs, entry, objstms: Default::default() };
         if let Some(offset) = &reader.entry {
             reader.build_xref_list(*offset);
         }
@@ -125,48 +131,67 @@ impl<T: BufRead + Seek> Reader<T> {
     }
 
     fn read_compressed(&self, num_within: ObjNum, index: ObjIndex, locator: &dyn Locator, oref_expd: &ObjRef) -> Result<Object, Error> {
-        let oref_ostm = ObjRef { num: num_within, gen: 0 };
-        let Some(Record::Used { offset, gen: 0 }) = locator.locate(&oref_ostm) else {
-            return Err(Error::Parse("object stream not located"));
+        let index = index as usize;
+        let cache_ref = self.read_cache_objstm(num_within, locator);
+        let objstm = match (*cache_ref).deref() {
+            Ok(objstm) => objstm,
+            Err(err) => return Err(err.clone())
         };
-        let Object::Stream(stm) = self.read_uncompressed(offset, &oref_ostm)? else {
+        let Some(&(num, ref obj)) = objstm.get(index) else {
+            return Err(Error::Parse("out of bounds index requested from object stream"));
+        };
+        if &(ObjRef { num, gen: 0 }) != oref_expd {
+            return Err(Error::Parse("object number mismatch"));
+        }
+        Ok(obj.clone())
+    }
+
+    fn read_cache_objstm(&self, ostm_num: ObjNum, locator: &dyn Locator) -> Box<dyn Deref<Target =  Result<ObjStm, Error>> + '_> {
+        let ostm_oref = ObjRef { num: ostm_num, gen: 0 };
+        let Some(Record::Used { offset: ostm_offset, gen: 0 }) = locator.locate(&ostm_oref) else {
+            return Box::new(&Err(Error::Parse("object stream not located")));
+        };
+        if let Entry::Vacant(entry) = self.objstms.borrow_mut().entry(ostm_offset) {
+            entry.insert(self.read_objstm(ostm_offset, ostm_oref, locator));
+        }
+        Box::new(Ref::map(self.objstms.borrow(), |objstms| objstms.get(&ostm_offset).unwrap()))
+    }
+
+    fn read_objstm(&self, ostm_offset: Offset, ostm_oref: ObjRef, locator: &dyn Locator) -> Result<ObjStm, Error> {
+        let Object::Stream(stm) = self.read_uncompressed(ostm_offset, &ostm_oref)? else {
             return Err(Error::Parse("object stream not found"));
         };
         // FIXME: /Type = /ObjStm
         let count = stm.dict.lookup(b"N").num_value()
             .ok_or(Error::Parse("malformed object stream (/N)"))?;
-        if index >= count {
-            return Err(Error::Parse("index >= /N requested from object stream"));
-        }
         let first = stm.dict.lookup(b"First").num_value()
             .ok_or(Error::Parse("malformed object stream (/First)"))?;
         let mut reader = self.read_stream_data(&stm, &Uncompressed(locator))?;
         let mut header = (&mut reader).take(first);
         use crate::parser::Tokenizer;
-        for _ in 0..index {
-            header.read_token()?;
-            header.read_token()?;
+        let mut entries = Vec::with_capacity(count);
+        for _ in 0..count {
+            let num = utils::parse_num::<ObjNum>(&header.read_token()?)
+                .ok_or(Error::Parse("malformed object stream header"))?;
+            let offset = utils::parse_num::<Offset>(&header.read_token()?)
+                .ok_or(Error::Parse("malformed object stream header"))?;
+            entries.push((num, offset));
         }
-        let num = utils::parse_num::<ObjNum>(&header.read_token()?)
-            .ok_or(Error::Parse("malformed object stream header"))?;
-        let offset = utils::parse_num::<Offset>(&header.read_token()?)
-            .ok_or(Error::Parse("malformed object stream header"))?;
-        if &(ObjRef { num, gen: 0 }) != oref_expd {
-            return Err(Error::Parse("object number mismatch"));
-        }
-        let _ = header.read_token();
-        let next_offset = header.read_token().ok()
-            .map(|tk| utils::parse_num::<Offset>(&tk).ok_or(Error::Parse("malformed object stream header")))
-            .transpose()?;
-        // Drain rest of header to get to start of objects.
         header.skip_to_end()?;
-        reader.skip_bytes(offset.try_into().expect("Should fit into u64."))?;
-        let obj = if let Some(next_offset) = next_offset {
-            ObjParser::read_obj(&mut reader.take(next_offset - offset))
-        } else {
-            ObjParser::read_obj(&mut reader)
-        }?;
-        Ok(obj)
+        let mut ret = Vec::new();
+        // FIXME: use array_windows() when stabilized
+        for win in entries.windows(2) {
+            let [(num, offset), (_, next_offset)] = *win else { unreachable!() };
+            let mut this_part = (&mut reader).take(next_offset - offset);
+            let obj = ObjParser::read_obj(&mut this_part)?;
+            ret.push((num, obj));
+            this_part.skip_to_end()?;
+        }
+        if let Some((num, _)) = entries.last() {
+            let obj = ObjParser::read_obj(&mut reader)?;
+            ret.push((*num, obj));
+        }
+        Ok(ret)
     }
 
     pub fn resolve_deep(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
