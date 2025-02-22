@@ -11,9 +11,6 @@ use crate::parser::{FileParser, ObjParser};
 use crate::codecs;
 use crate::utils;
 
-mod bufskip;
-use bufskip::*;
-
 pub struct Reader<T: BufRead + Seek> {
     parser: FileParser<T>,
     xrefs: BTreeMap<Offset, Rc<XRefLink>>,
@@ -167,6 +164,10 @@ impl<T: BufRead + Seek> Reader<T> {
         let first = stm.dict.lookup(b"First").num_value()
             .ok_or(Error::Parse("malformed object stream (/First)"))?;
         let mut reader = self.read_stream_data(&stm, &Uncompressed(locator))?;
+        fn drain(mut r: impl Read) -> std::io::Result<u64> {
+            // https://stackoverflow.com/a/42247224
+            std::io::copy(&mut r, &mut std::io::sink())
+        }
         let mut header = (&mut reader).take(first);
         use crate::parser::Tokenizer;
         let mut entries = Vec::with_capacity(count);
@@ -177,7 +178,7 @@ impl<T: BufRead + Seek> Reader<T> {
                 .ok_or(Error::Parse("malformed object stream header"))?;
             entries.push((num, offset));
         }
-        header.skip_to_end()?;
+        drain(header)?;
         let mut ret = Vec::new();
         // FIXME: use array_windows() when stabilized
         for win in entries.windows(2) {
@@ -185,7 +186,7 @@ impl<T: BufRead + Seek> Reader<T> {
             let mut this_part = (&mut reader).take(next_offset - offset);
             let obj = ObjParser::read_obj(&mut this_part)?;
             ret.push((num, obj));
-            this_part.skip_to_end()?;
+            drain(this_part)?;
         }
         if let Some((num, _)) = entries.last() {
             let obj = ObjParser::read_obj(&mut reader)?;
