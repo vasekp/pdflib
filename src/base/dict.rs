@@ -24,3 +24,20 @@ impl Display for Dict {
         f.write_str(">>")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::base::*;
+
+    #[test]
+    fn test_dict() {
+        let dict = Dict(vec![
+            (Name::from("NKey"), Object::new_name("Nvalue")),
+            (Name::from("IKey"), Object::Number(Number::Int(10))),
+        ]);
+        assert_eq!(dict.lookup(b"NKey"), &Object::new_name("Nvalue"));
+        assert_eq!(dict.lookup(b"IKey"), &Object::Number(Number::Int(10)));
+        assert_eq!(dict.lookup(b"Missing"), &Object::Null);
+    }
+}
