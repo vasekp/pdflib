@@ -369,6 +369,12 @@ mod tests {
 
         // no xref
         assert!(fp.read_xref_at(0).is_err());
+
+        // This file has an empty line between xref and trailer.
+        // Also, I deliberately point to a comment line preceding xref.
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/increment.pdf").unwrap()));
+        let xref = fp.read_xref_at(5230).unwrap();
+        assert!(matches!(xref.tpe, XRefType::Table));
     }
 
     #[test]
