@@ -23,7 +23,10 @@ struct XRefLink {
     next: Option<Rc<XRefLink>>
 }
 
-type ObjStm = Vec<(ObjNum, Object)>;
+struct ObjStm {
+    entries: Vec<(ObjNum, Offset)>,
+    source: Vec<u8>,
+}
 
 impl<T: BufRead + Seek> Reader<T> {
     pub fn new(source: T) -> Self {
@@ -134,13 +137,17 @@ impl<T: BufRead + Seek> Reader<T> {
             Ok(objstm) => objstm,
             Err(err) => return Err(err.clone())
         };
-        let Some(&(num, ref obj)) = objstm.get(index) else {
+        let Some(&(num, start_offset)) = objstm.entries.get(index) else {
             return Err(Error::Parse("out of bounds index requested from object stream"));
         };
         if &(ObjRef { num, gen: 0 }) != oref_expd {
             return Err(Error::Parse("object number mismatch"));
         }
-        Ok(obj.clone())
+        let end_offset = objstm.entries.get(index + 1)
+            .map(|entry| entry.1.try_into().unwrap())
+            .unwrap_or(objstm.source.len());
+        let mut source = &objstm.source[start_offset.try_into().unwrap()..end_offset];
+        ObjParser::read_obj(&mut source)
     }
 
     fn read_cache_objstm(&self, ostm_num: ObjNum, locator: &dyn Locator) -> Box<dyn Deref<Target =  Result<ObjStm, Error>> + '_> {
@@ -164,10 +171,6 @@ impl<T: BufRead + Seek> Reader<T> {
         let first = stm.dict.lookup(b"First").num_value()
             .ok_or(Error::Parse("malformed object stream (/First)"))?;
         let mut reader = self.read_stream_data(&stm, &Uncompressed(locator))?;
-        fn drain(mut r: impl Read) -> std::io::Result<u64> {
-            // https://stackoverflow.com/a/42247224
-            std::io::copy(&mut r, &mut std::io::sink())
-        }
         let mut header = (&mut reader).take(first);
         use crate::parser::Tokenizer;
         let mut entries = Vec::with_capacity(count);
@@ -178,21 +181,12 @@ impl<T: BufRead + Seek> Reader<T> {
                 .ok_or(Error::Parse("malformed object stream header"))?;
             entries.push((num, offset));
         }
-        drain(header)?;
-        let mut ret = Vec::new();
-        // FIXME: use array_windows() when stabilized
-        for win in entries.windows(2) {
-            let [(num, offset), (_, next_offset)] = *win else { unreachable!() };
-            let mut this_part = (&mut reader).take(next_offset - offset);
-            let obj = ObjParser::read_obj(&mut this_part)?;
-            ret.push((num, obj));
-            drain(this_part)?;
-        }
-        if let Some((num, _)) = entries.last() {
-            let obj = ObjParser::read_obj(&mut reader)?;
-            ret.push((*num, obj));
-        }
-        Ok(ret)
+        // Drain the rest of header: https://stackoverflow.com/a/42247224
+        std::io::copy(&mut header, &mut std::io::sink())?;
+        let mut source = Vec::new();
+        std::io::copy(&mut reader, &mut source)?;
+        source.shrink_to_fit();
+        Ok(ObjStm { entries, source })
     }
 
     pub fn resolve_deep(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
