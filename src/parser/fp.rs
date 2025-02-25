@@ -318,6 +318,70 @@ impl<T: BufRead> BufRead for StreamReader<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    //use super::*;
-    //TODO
+    use super::*;
+    use std::io::*;
+    use std::fs::*;
+
+    #[test]
+    fn test_header_entrypoint() {
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/basic.pdf").unwrap()));
+        let header = fp.header.as_ref().unwrap();
+        assert_eq!(header.start, 0);
+        assert_eq!(header.version, (1, 4));
+        let entry = fp.entrypoint().unwrap();
+        assert_eq!(entry, 1036);
+        let mut r = fp.read_raw(entry).unwrap().take(4);
+        let mut s = String::new();
+        r.read_to_string(&mut s).unwrap();
+        assert_eq!(s, "xref");
+
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/offset.pdf").unwrap()));
+        let entry = fp.entrypoint().unwrap();
+        assert_eq!(entry, 4248);
+        let offset = fp.header.as_ref().unwrap().start;
+        assert_eq!(offset, 656);
+        let start = entry + offset;
+        let mut r = fp.read_raw(start).unwrap().take(4);
+        let mut s = String::new();
+        r.read_to_string(&mut s).unwrap();
+        assert_eq!(s, "xref");
+    }
+
+    #[test]
+    fn test_read_xref() {
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/hybrid.pdf").unwrap()));
+        let xref = fp.read_xref_at(912).unwrap();
+        assert!(matches!(xref.tpe, XRefType::Table));
+        assert_eq!(xref.dict.lookup(b"XRefStm").num_value(), Some(759));
+        assert_eq!(xref.dict.lookup(b"Prev").num_value(), Some(417));
+
+        let xref = fp.read_xref_at(759).unwrap();
+        assert!(matches!(xref.tpe, XRefType::Stream(ObjRef { num: 6, gen: 0 })));
+        assert_eq!(xref.dict.lookup(b"Type"), &Object::new_name("XRef"));
+
+        let xref = fp.read_xref_at(417).unwrap();
+        assert!(matches!(xref.tpe, XRefType::Table));
+        assert_eq!(xref.dict.lookup(b"Size").num_value(), Some(6));
+
+        // non-xref object
+        assert!(fp.read_xref_at(251).is_err());
+        assert!(fp.read_obj_at(251).is_ok());
+
+        // no xref
+        assert!(fp.read_xref_at(0).is_err());
+    }
+
+    #[test]
+    fn test_read_obj_at() {
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/basic.pdf").unwrap()));
+
+        let (oref, obj) = fp.read_obj_at(15).unwrap();
+        assert_eq!(oref, ObjRef { num: 4, gen: 0 });
+        let Object::Stream(Stream { data, .. }) = obj else { panic!() };
+        assert_eq!(data, Data::Ref(74));
+
+        // xref instead of object
+        assert!(fp.read_obj_at(1036).is_err());
+        assert!(fp.read_xref_at(1036).is_ok());
+    }
 }
