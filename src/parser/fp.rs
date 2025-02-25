@@ -173,7 +173,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         }
     }
 
-    pub fn read_xref_at(&mut self, pos: Offset) -> Result<XRef, Error> {
+    pub fn read_xref_at(&self, pos: Offset) -> Result<XRef, Error> {
         match self.read_at(pos)? {
             Structural::XRefSec(xref) => Ok(xref),
             Structural::Object(oref, obj) => self.read_xref_stream(oref, obj)
@@ -218,7 +218,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         Ok(XRef { tpe: XRefType::Table, map, dict: trailer, size })
     }
 
-    fn read_xref_stream(&mut self, oref: ObjRef, obj: Object) -> Result<XRef, Error> {
+    fn read_xref_stream(&self, oref: ObjRef, obj: Object) -> Result<XRef, Error> {
         let mut reader = self.reader.borrow_mut();
         let Object::Stream(Stream{dict, data: Data::Ref(offset)}) = obj else {
             return Err(Error::Parse("malfomed xref"))
