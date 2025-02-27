@@ -167,13 +167,13 @@ impl<T: BufRead + Seek> Reader<T> {
             return Box::new(&Err(Error::Parse("object stream not located")));
         };
         if let Entry::Vacant(entry) = self.objstms.borrow_mut().entry(ostm_offset) {
-            entry.insert(self.read_objstm(ostm_offset, ostm_oref, locator));
+            entry.insert(self.read_objstm(ostm_offset, &ostm_oref, locator));
         }
         Box::new(Ref::map(self.objstms.borrow(), |objstms| objstms.get(&ostm_offset).unwrap()))
     }
 
-    fn read_objstm(&self, ostm_offset: Offset, ostm_oref: ObjRef, locator: &dyn Locator) -> Result<ObjStm, Error> {
-        let Object::Stream(stm) = self.read_uncompressed(ostm_offset, &ostm_oref)? else {
+    fn read_objstm(&self, ostm_offset: Offset, ostm_oref: &ObjRef, locator: &dyn Locator) -> Result<ObjStm, Error> {
+        let Object::Stream(stm) = self.read_uncompressed(ostm_offset, ostm_oref)? else {
             return Err(Error::Parse("object stream not found"));
         };
         // FIXME: /Type = /ObjStm
