@@ -269,9 +269,9 @@ mod tests {
         let (obj, link) = res.unwrap();
         assert_eq!(oref, ObjRef { num: 1, gen: 0 });
         assert_eq!(obj, Object::Dict(Dict(vec![
-            (Name::from("Type"), Object::new_name("Pages")),
-            (Name::from("Kids"), Object::Array(vec![Object::Ref(ObjRef { num: 2, gen: 0 })])),
-            (Name::from("Count"), Object::Number(Number::Int(1))),
+            (Name::from(b"Type"), Object::new_name(b"Pages")),
+            (Name::from(b"Kids"), Object::Array(vec![Object::Ref(ObjRef { num: 2, gen: 0 })])),
+            (Name::from(b"Count"), Object::Number(Number::Int(1))),
         ])));
         let kids = rdr.resolve_ref(&ObjRef { num: 2, gen: 0 }, &link).unwrap();
 
@@ -302,7 +302,7 @@ mod tests {
         let Object::Stream(Stream { dict, .. }) = obj else { panic!() };
         let fil = dict.lookup(b"Filter");
         let res = rdr.resolve_deep(&fil, loc).unwrap();
-        assert_eq!(res, Object::Array(vec![ Object::new_name("AsciiHexDecode"), Object::new_name("FlateDecode")]));
+        assert_eq!(res, Object::Array(vec![ Object::new_name(b"AsciiHexDecode"), Object::new_name(b"FlateDecode")]));
     }
 
     #[test]
@@ -390,8 +390,8 @@ mod tests {
         assert!(rdr.objstms.borrow().is_empty());
         let obj = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, loc).unwrap();
         assert_eq!(obj, Object::Dict(Dict(vec![
-            (Name::from("Pages"), Object::Ref(ObjRef { num: 9, gen: 0 })),
-            (Name::from("Type"), Object::new_name("Catalog")),
+            (Name::from(b"Pages"), Object::Ref(ObjRef { num: 9, gen: 0 })),
+            (Name::from(b"Type"), Object::new_name(b"Catalog")),
         ])));
 
         let objstms = rdr.objstms.borrow();

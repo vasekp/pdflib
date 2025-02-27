@@ -21,11 +21,11 @@ pub enum Object {
 }
 
 impl Object {
-    pub fn new_string(s: &str) -> Object {
-        Object::String(s.bytes().collect())
+    pub fn new_string(s: &[u8]) -> Object {
+        Object::String(s.to_owned())
     }
 
-    pub fn new_name(s: &str) -> Object {
+    pub fn new_name(s: &[u8]) -> Object {
         Object::Name(Name::from(s))
     }
 
@@ -82,36 +82,36 @@ mod tests {
     fn test_display() {
         assert_eq!(format!("{}", Object::Number(Number::Real(-1.))), "-1");
         assert_eq!(format!("{}", Object::Number(Number::Real(0.0000000000000001))), "0.0000000000000001");
-        assert_eq!(format!("{}", Object::new_string("")), "()");
-        assert_eq!(format!("{}", Object::new_string("\0\r\n\\")), "(\\000\\r\\n\\\\)");
-        assert_eq!(format!("{}", Object::new_string("()")), "(\\(\\))");
-        assert_eq!(format!("{}", Object::new_string("a\nb c")), "(a\\nb c)");
-        assert_eq!(format!("{}", Object::new_name(" A#/$*(%\n")), "/#20A#23#2F$*#28#25#0A");
+        assert_eq!(format!("{}", Object::new_string(b"")), "()");
+        assert_eq!(format!("{}", Object::new_string(b"\0\r\n\\")), "(\\000\\r\\n\\\\)");
+        assert_eq!(format!("{}", Object::new_string(b"()")), "(\\(\\))");
+        assert_eq!(format!("{}", Object::new_string(b"a\nb c")), "(a\\nb c)");
+        assert_eq!(format!("{}", Object::new_name(b" A#/$*(%\n")), "/#20A#23#2F$*#28#25#0A");
         assert_eq!(format!("{}", Object::Array(vec![
                 Object::Number(Number::Int(549)),
                 #[allow(clippy::approx_constant)]
                 Object::Number(Number::Real(3.14)),
                 Object::Bool(false),
-                Object::new_string("Ralph"),
-                Object::new_name("SomeName")
+                Object::new_string(b"Ralph"),
+                Object::new_name(b"SomeName")
         ])), "[ 549 3.14 false (Ralph) /SomeName ]");
         assert_eq!(format!("{}", Object::Array(vec![Object::Array(vec![Object::Bool(true)])])), "[ [ true ] ]");
         assert_eq!(format!("{}", Object::Dict(Dict(vec![
-            (Name::from("Type"), Object::new_name("Example")),
-            (Name::from("Subtype"), Object::new_name("DictionaryExample")),
-            (Name::from("Version"), Object::Number(Number::Real(0.01))),
-            (Name::from("IntegerItem"), Object::Number(Number::Int(12))),
-            (Name::from("StringItem"), Object::new_string("a string")),
-            (Name::from("Subdictionary"), Object::Dict(Dict(vec![
-                (Name::from("Item1"), Object::Number(Number::Real(0.4))),
-                (Name::from("Item2"), Object::Bool(true)),
-                (Name::from("LastItem"), Object::new_string("not !")),
-                (Name::from("VeryLastItem"), Object::new_string("OK"))
+            (Name::from(b"Type"), Object::new_name(b"Example")),
+            (Name::from(b"Subtype"), Object::new_name(b"DictionaryExample")),
+            (Name::from(b"Version"), Object::Number(Number::Real(0.01))),
+            (Name::from(b"IntegerItem"), Object::Number(Number::Int(12))),
+            (Name::from(b"StringItem"), Object::new_string(b"a string")),
+            (Name::from(b"Subdictionary"), Object::Dict(Dict(vec![
+                (Name::from(b"Item1"), Object::Number(Number::Real(0.4))),
+                (Name::from(b"Item2"), Object::Bool(true)),
+                (Name::from(b"LastItem"), Object::new_string(b"not !")),
+                (Name::from(b"VeryLastItem"), Object::new_string(b"OK"))
             ])))
         ]))), "<< /Type /Example /Subtype /DictionaryExample /Version 0.01 /IntegerItem 12 \
         /StringItem (a string) /Subdictionary << /Item1 0.4 /Item2 true /LastItem (not !) \
         /VeryLastItem (OK) >> >>");
         assert_eq!(format!("{}", Object::Dict(Dict(vec![
-            (Name::from("Length"), Object::Ref(ObjRef{num: 8, gen: 0}))]))), "<< /Length 8 0 R >>");
+            (Name::from(b"Length"), Object::Ref(ObjRef{num: 8, gen: 0}))]))), "<< /Length 8 0 R >>");
     }
 }

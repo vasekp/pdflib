@@ -33,10 +33,10 @@ mod tests {
     #[test]
     fn test_dict() {
         let dict = Dict(vec![
-            (Name::from("NKey"), Object::new_name("Nvalue")),
-            (Name::from("IKey"), Object::Number(Number::Int(10))),
+            (Name::from(b"NKey"), Object::new_name(b"Nvalue")),
+            (Name::from(b"IKey"), Object::Number(Number::Int(10))),
         ]);
-        assert_eq!(dict.lookup(b"NKey"), &Object::new_name("Nvalue"));
+        assert_eq!(dict.lookup(b"NKey"), &Object::new_name(b"Nvalue"));
         assert_eq!(dict.lookup(b"IKey"), &Object::Number(Number::Int(10)));
         assert_eq!(dict.lookup(b"Missing"), &Object::Null);
     }

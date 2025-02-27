@@ -3,9 +3,15 @@ use std::fmt::{Display, Debug, Formatter};
 #[derive(PartialEq, Clone)]
 pub struct Name(pub Vec<u8>);
 
-impl From<&str> for Name {
-    fn from(s: &str) -> Name {
-        Name(s.bytes().collect())
+impl From<&[u8]> for Name {
+    fn from(s: &[u8]) -> Name {
+        Name(s.to_owned())
+    }
+}
+
+impl<const N: usize> From<&[u8; N]> for Name {
+    fn from(s: &[u8; N]) -> Name {
+        Name(s.to_vec())
     }
 }
 

@@ -223,7 +223,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         let Object::Stream(Stream{dict, data: Data::Ref(offset)}) = obj else {
             return Err(Error::Parse("malfomed xref"))
         };
-        if dict.lookup(b"Type") != &Object::new_name("XRef") {
+        if dict.lookup(b"Type") != &Object::new_name(b"XRef") {
             return Err(Error::Parse("malfomed xref stream (/Type)"))
         }
         let size = dict.lookup(b"Size").num_value()
@@ -357,7 +357,7 @@ mod tests {
 
         let xref = fp.read_xref_at(759).unwrap();
         assert!(matches!(xref.tpe, XRefType::Stream(ObjRef { num: 6, gen: 0 })));
-        assert_eq!(xref.dict.lookup(b"Type"), &Object::new_name("XRef"));
+        assert_eq!(xref.dict.lookup(b"Type"), &Object::new_name(b"XRef"));
 
         let xref = fp.read_xref_at(417).unwrap();
         assert!(matches!(xref.tpe, XRefType::Table));
