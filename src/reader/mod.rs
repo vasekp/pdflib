@@ -110,14 +110,18 @@ impl<T: BufRead + Seek> Reader<T> {
             })
     }
 
-    pub fn resolve(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
-        let Object::Ref(objref) = obj else {
-            return Ok(obj.to_owned());
-        };
+    pub fn resolve_ref(&self, objref: &ObjRef, locator: &dyn Locator) -> Result<Object, Error> {
         match locator.locate(objref) {
             Some(Record::Used { offset, .. }) => self.read_uncompressed(offset, objref),
             Some(Record::Compr { num_within, index }) => self.read_compressed(num_within, index, locator, objref),
             _ => Ok(Object::Null)
+        }
+    }
+
+    pub fn resolve_obj(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
+        match obj {
+            Object::Ref(objref) => self.resolve_ref(objref, locator),
+            _ => Ok(obj.to_owned())
         }
     }
 
@@ -197,15 +201,15 @@ impl<T: BufRead + Seek> Reader<T> {
     }
 
     pub fn resolve_deep(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
-        Ok(match self.resolve(obj, locator)? {
+        Ok(match self.resolve_obj(obj, locator)? {
             Object::Array(arr) =>
                 Object::Array(arr.into_iter()
-                    .map(|obj| self.resolve(&obj, locator))
+                    .map(|obj| self.resolve_obj(&obj, locator))
                     .collect::<Result<Vec<_>, _>>()?),
             Object::Dict(dict) =>
                 Object::Dict(Dict(dict.0.into_iter()
                     .map(|(name, obj)| -> Result<(Name, Object), Error> {
-                        Ok((name, self.resolve(&obj, locator)?))
+                        Ok((name, self.resolve_obj(&obj, locator)?))
                     })
                     .collect::<Result<Vec<_>, _>>()?)),
             obj => obj
@@ -215,7 +219,7 @@ impl<T: BufRead + Seek> Reader<T> {
     pub fn read_stream_data(&self, obj: &Stream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error>
     {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
-        let len = self.resolve(obj.dict.lookup(b"Length"), locator)?.num_value().unwrap(); // TODO
+        let len = self.resolve_obj(obj.dict.lookup(b"Length"), locator)?.num_value().unwrap(); // TODO
         let filters = self.resolve_deep(obj.dict.lookup(b"Filter"), locator)?;
         let params = match obj.dict.lookup(b"DecodeParms") {
             Object::Dict(dict) => Some(dict),
@@ -269,7 +273,7 @@ mod tests {
             (Name::from("Kids"), Object::Array(vec![Object::Ref(ObjRef { num: 2, gen: 0 })])),
             (Name::from("Count"), Object::Number(Number::Int(1))),
         ])));
-        let kids = rdr.resolve(&Object::Ref(ObjRef { num: 2, gen: 0 }), &link).unwrap();
+        let kids = rdr.resolve_ref(&ObjRef { num: 2, gen: 0 }, &link).unwrap();
 
         let (oref, res) = iter.next().unwrap();
         let (obj, _) = res.unwrap();
@@ -294,7 +298,7 @@ mod tests {
     fn test_resolve_deep() {
         let rdr = Reader::new(BufReader::new(File::open("src/tests/indirect-filters.pdf").unwrap()));
         let loc = rdr.base_locator();
-        let obj = rdr.resolve(&Object::Ref(ObjRef { num: 4, gen: 0 }), loc).unwrap();
+        let obj = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, loc).unwrap();
         let Object::Stream(Stream { dict, .. }) = obj else { panic!() };
         let fil = dict.lookup(b"Filter");
         let res = rdr.resolve_deep(&fil, loc).unwrap();
@@ -345,7 +349,7 @@ mod tests {
         assert_eq!(Rc::as_ptr(x322.next.as_ref().unwrap()), Rc::as_ptr(&x87));
         assert!(x87.next.is_none());
 
-        let Object::Stream(stm) = rdr.resolve(&Object::Ref(ObjRef { num: 1, gen: 0 }), x87).unwrap()
+        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x87).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, x87).unwrap();
         let mut s = String::new();
@@ -353,7 +357,7 @@ mod tests {
         drop(data);
         assert_eq!(s, "Test 1");
 
-        let Object::Stream(stm) = rdr.resolve(&Object::Ref(ObjRef { num: 1, gen: 0 }), x322).unwrap()
+        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x322).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, x322).unwrap();
         let mut s = String::new();
@@ -361,7 +365,7 @@ mod tests {
         drop(data);
         assert_eq!(s, "Test 2");
 
-        let Object::Stream(stm) = rdr.resolve(&Object::Ref(ObjRef { num: 1, gen: 0 }), x510).unwrap()
+        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x510).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, x510).unwrap();
         let mut s = String::new();
@@ -384,7 +388,7 @@ mod tests {
         let loc = rdr.base_locator();
         assert_eq!(loc.locate(&ObjRef { num: 1, gen: 0 }), Some(Record::Compr { num_within: 8, index: 4 }));
         assert!(rdr.objstms.borrow().is_empty());
-        let obj = rdr.resolve(&Object::Ref(ObjRef { num: 1, gen: 0 }), loc).unwrap();
+        let obj = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, loc).unwrap();
         assert_eq!(obj, Object::Dict(Dict(vec![
             (Name::from("Pages"), Object::Ref(ObjRef { num: 9, gen: 0 })),
             (Name::from("Type"), Object::new_name("Catalog")),
@@ -397,7 +401,7 @@ mod tests {
         assert_eq!(s, "<</Font<</F1 5 0 R>>/ProcSet[/PDF/Text/ImageC/ImageB/ImageI]>>\n");
         drop(objstms);
 
-        let obj2 = rdr.resolve(&Object::Ref(ObjRef { num: 1, gen: 0 }), loc).unwrap();
+        let obj2 = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, loc).unwrap();
         assert_eq!(obj, obj2);
     }
 
@@ -407,7 +411,7 @@ mod tests {
 2 0 3 1 4 2614
 endstream endobj";
         let rdr = Reader::new(Cursor::new(source));
-        let objstm = rdr.read_objstm(0, ObjRef { num: 1, gen: 0 }, &()).unwrap();
+        let objstm = rdr.read_objstm(0, &ObjRef { num: 1, gen: 0 }, &()).unwrap();
         assert_eq!(objstm.entries, vec![(2, 0), (3, 1), (4, 2)]);
         assert_eq!(objstm.source, b"614");
 
@@ -422,11 +426,11 @@ endstream endobj";
             }
         }
         let loc = MockLocator();
-        assert_eq!(rdr.resolve(&Object::Ref(ObjRef { num: 2, gen: 0 }), &loc).unwrap(),
+        assert_eq!(rdr.resolve_ref(&ObjRef { num: 2, gen: 0 }, &loc).unwrap(),
             Object::Number(Number::Int(6)));
-        assert_eq!(rdr.resolve(&Object::Ref(ObjRef { num: 3, gen: 0 }), &loc).unwrap(),
+        assert_eq!(rdr.resolve_ref(&ObjRef { num: 3, gen: 0 }, &loc).unwrap(),
             Object::Number(Number::Int(1)));
-        assert_eq!(rdr.resolve(&Object::Ref(ObjRef { num: 4, gen: 0 }), &loc).unwrap(),
+        assert_eq!(rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &loc).unwrap(),
             Object::Number(Number::Int(4)));
     }
 }
