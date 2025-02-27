@@ -130,6 +130,13 @@ impl<T: BufRead + Seek> Reader<T> {
         }
     }
 
+    pub fn base_locator(&self) -> &dyn Locator {
+        self.entry
+            .and_then(|offset| self.xrefs.get(&offset))
+            .map(|rc| rc as &dyn Locator)
+            .unwrap_or(&() as &dyn Locator)
+    }
+
     fn read_compressed(&self, num_within: ObjNum, index: ObjIndex, locator: &dyn Locator, oref_expd: &ObjRef) -> Result<Object, Error> {
         let index = index as usize;
         let cache_ref = self.read_cache_objstm(num_within, locator);
