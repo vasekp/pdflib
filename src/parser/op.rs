@@ -152,8 +152,8 @@ impl<T: BufRead> ObjParser<T> {
 
     fn read_name(&mut self) -> Result<Name, Error> {
         match self.reader.peek() {
-            Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Name(Vec::new())),
-            None => return Ok(Name(Vec::new())),
+            Some(c) if CharClass::of(c) != CharClass::Reg => return Ok(Name::from(b"")),
+            None => return Ok(Name::from(b"")),
             _ => ()
         };
         let tk = self.next_token()?;
@@ -361,7 +361,7 @@ are the same.) (These two strings are the same.)");
                 Object::new_string(b"Ralph"),
                 Object::new_name(b"SomeName")
         ]));
-        assert_eq!(parser.read_obj_inner().unwrap(), Object::Array(Vec::new()));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Array(vec![]));
         assert!(parser.read_obj_inner().is_err());
     }
 
@@ -392,6 +392,9 @@ are the same.) (These two strings are the same.)");
                 (Name::from(b"VeryLastItem"), Object::new_string(b"OK"))
             ])))
         ])));
+
+        let mut parser = ObjParser::from("<<>>");
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Dict(Dict(vec![])));
     }
 
     #[test]
@@ -430,18 +433,17 @@ are the same.) (These two strings are the same.)");
 
     #[test]
     fn test_read_obj() {
-        let mut input = Cursor::new("0012");
-        assert_eq!(ObjParser::read_obj(&mut input).unwrap(), Object::Number(Number::Int(12)));
+        assert_eq!(ObjParser::read_obj(&mut Cursor::new("0012")).unwrap(),
+            Object::Number(Number::Int(12)));
 
-        let mut input = Cursor::new("1 0 R");
-        assert_eq!(ObjParser::read_obj(&mut input).unwrap(), Object::Number(Number::Int(1)));
+        assert_eq!(ObjParser::read_obj(&mut Cursor::new("1 0 R")).unwrap(),
+            Object::Number(Number::Int(1)));
 
-        let mut input = Cursor::new("<</Length 8 0 R>>");
-        assert_eq!(ObjParser::read_obj(&mut input).unwrap(), Object::Dict(Dict(vec![
-            (Name::from(b"Length"), Object::Ref(ObjRef{num: 8, gen: 0}))
-        ])));
+        assert_eq!(ObjParser::read_obj(&mut Cursor::new("<</Length 8 0 R>>")).unwrap(),
+            Object::Dict(Dict(vec![
+                (Name::from(b"Length"), Object::Ref(ObjRef{num: 8, gen: 0}))
+            ])));
 
-        let mut input = Cursor::new("R");
-        assert!(ObjParser::read_obj(&mut input).is_err());
+        assert!(ObjParser::read_obj(&mut Cursor::new("R")).is_err());
     }
 }
