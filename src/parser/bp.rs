@@ -71,6 +71,7 @@ pub trait ByteProvider: BufRead {
                 }
             }
         }
+        line.shrink_to_fit();
         Ok(line)
     }
 
@@ -78,7 +79,7 @@ pub trait ByteProvider: BufRead {
         self.read_line_inner(false)
     }
 
-    fn _read_line_incl(&mut self) -> std::io::Result<Vec<u8>> {
+    fn read_line_incl(&mut self) -> std::io::Result<Vec<u8>> {
         self.read_line_inner(true)
     }
 }
@@ -103,12 +104,12 @@ mod tests {
         assert!(bytes.read_line_excl().is_err());
 
         let mut bytes = Cursor::new("line 1\nline 2\rline 3\r\nline 4\n\rline 5");
-        assert_eq!(bytes._read_line_incl().unwrap(), b"line 1\n");
-        assert_eq!(bytes._read_line_incl().unwrap(), b"line 2\r");
-        assert_eq!(bytes._read_line_incl().unwrap(), b"line 3\r\n");
-        assert_eq!(bytes._read_line_incl().unwrap(), b"line 4\n");
-        assert_eq!(bytes._read_line_incl().unwrap(), b"\r");
-        assert_eq!(bytes._read_line_incl().unwrap(), b"line 5");
-        assert!(bytes._read_line_incl().is_err());
+        assert_eq!(bytes.read_line_incl().unwrap(), b"line 1\n");
+        assert_eq!(bytes.read_line_incl().unwrap(), b"line 2\r");
+        assert_eq!(bytes.read_line_incl().unwrap(), b"line 3\r\n");
+        assert_eq!(bytes.read_line_incl().unwrap(), b"line 4\n");
+        assert_eq!(bytes.read_line_incl().unwrap(), b"\r");
+        assert_eq!(bytes.read_line_incl().unwrap(), b"line 5");
+        assert!(bytes.read_line_incl().is_err());
     }
 }

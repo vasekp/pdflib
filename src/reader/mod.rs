@@ -11,6 +11,9 @@ use crate::parser::{FileParser, ObjParser};
 use crate::codecs;
 use crate::utils;
 
+mod esr;
+use esr::EndstreamReader;
+
 pub struct Reader<T: BufRead + Seek> {
     parser: FileParser<T>,
     xrefs: BTreeMap<Offset, Rc<XRefLink>>,
@@ -219,7 +222,7 @@ impl<T: BufRead + Seek> Reader<T> {
     pub fn read_stream_data(&self, obj: &Stream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error>
     {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
-        let len = self.resolve_obj(obj.dict.lookup(b"Length"), locator)?.num_value().unwrap(); // TODO
+        let len = self.resolve_obj(obj.dict.lookup(b"Length"), locator)?.num_value();
         let filters = self.resolve_deep(obj.dict.lookup(b"Filter"), locator)?;
         let params = match obj.dict.lookup(b"DecodeParms") {
             Object::Dict(dict) => Some(dict),
@@ -227,7 +230,13 @@ impl<T: BufRead + Seek> Reader<T> {
             _ => return Err(Error::Parse("malformed /DecodeParms"))
         };
         let reader = self.parser.read_raw(offset)?;
-        let codec_in = reader.take(len);
+        let codec_in: Box<dyn BufRead> = match len {
+            Some(len) => Box::new(reader.take(len)),
+            None => {
+                log::warn!("Stream with invalid or missing /Length found, reading until endstream.");
+                Box::new(EndstreamReader::new(reader))
+            }
+        };
         let codec_out = codecs::decode(codec_in, &codecs::to_filters(&filters)?, params);
         Ok(codec_out)
     }
@@ -431,5 +440,58 @@ endstream endobj";
             Object::Number(Number::Int(1)));
         assert_eq!(rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &loc).unwrap(),
             Object::Number(Number::Int(4)));
+    }
+
+    #[test]
+    fn test_read_stream_overflow() {
+        let source = "1 0 obj <</Length 10>> stream\n123\nendstream endobj";
+        let rdr = Reader::new(Cursor::new(source));
+        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
+            else { panic!() };
+        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
+        let mut s = String::new();
+        data.read_to_string(&mut s).unwrap();
+        drop(data);
+        assert_eq!(s, "123\nendstr");
+
+        let source = "1 0 obj <</Length 100>> stream\n123\nendstream endobj";
+        let rdr = Reader::new(Cursor::new(source));
+        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
+            else { panic!() };
+        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
+        let mut s = String::new();
+        data.read_to_string(&mut s).unwrap();
+        drop(data);
+        assert_eq!(s, "123\nendstream endobj");
+
+        let source = "1 0 obj <</Length 10>> stream\n123";
+        let rdr = Reader::new(Cursor::new(source));
+        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
+            else { panic!() };
+        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
+        let mut s = String::new();
+        data.read_to_string(&mut s).unwrap();
+        drop(data);
+        assert_eq!(s, "123");
+
+        let source = "1 0 obj <<>> stream\n123\n45endstream endobj";
+        let rdr = Reader::new(Cursor::new(source));
+        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
+            else { panic!() };
+        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
+        let mut s = String::new();
+        data.read_to_string(&mut s).unwrap();
+        drop(data);
+        assert_eq!(s, "123\n45");
+
+        let source = "1 0 obj <<>> stream\n123";
+        let rdr = Reader::new(Cursor::new(source));
+        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
+            else { panic!() };
+        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
+        let mut s = String::new();
+        data.read_to_string(&mut s).unwrap();
+        drop(data);
+        assert_eq!(s, "123");
     }
 }
