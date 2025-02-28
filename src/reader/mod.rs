@@ -259,6 +259,7 @@ mod tests {
     use super::*;
     use std::io::*;
     use std::fs::*;
+    use crate::parser::bp::ByteProvider;
 
     #[test]
     fn test_objects_iter() {
@@ -287,9 +288,8 @@ mod tests {
         let (obj, link) = res.unwrap();
         let Object::Stream(stm) = obj else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &link).unwrap();
-        let mut s = String::new();
-        data.read_line(&mut s).unwrap();
-        assert_eq!(s, "1 0 0 -1 0 841.889771 cm\n");
+        let line = data.read_line_excl().unwrap();
+        assert_eq!(line, b"1 0 0 -1 0 841.889771 cm");
 
         //etc.
     }
@@ -396,9 +396,8 @@ mod tests {
 
         let objstms = rdr.objstms.borrow();
         assert!(!objstms.is_empty());
-        let mut s = String::new();
-        BufRead::read_line(&mut objstms.get(&4973).unwrap().as_ref().unwrap().source.as_slice(), &mut s).unwrap();
-        assert_eq!(s, "<</Font<</F1 5 0 R>>/ProcSet[/PDF/Text/ImageC/ImageB/ImageI]>>\n");
+        let line = objstms.get(&4973).unwrap().as_ref().unwrap().source.as_slice().read_line_excl().unwrap();
+        assert_eq!(line, b"<</Font<</F1 5 0 R>>/ProcSet[/PDF/Text/ImageC/ImageB/ImageI]>>");
         drop(objstms);
 
         let obj2 = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, loc).unwrap();
