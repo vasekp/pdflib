@@ -1,4 +1,4 @@
-use pdflib::reader::SimpleReader;
+use pdflib::reader::FullReader;
 use pdflib::base::*;
 
 use std::io::BufReader;
@@ -13,13 +13,13 @@ fn main() -> Result<(), pdflib::base::Error> {
 
     let fname = std::env::args().nth(1).unwrap_or("tests/basic.pdf".into());
 
-    let rdr = SimpleReader::new(BufReader::new(File::open(fname)?))?;
+    let rdr = FullReader::new(BufReader::new(File::open(fname)?));
     for (objref, res) in rdr.objects() {
         match res {
-            Ok(obj) => {
+            Ok((obj, link)) => {
                 println!("{objref}: {obj}");
                 if let Object::Stream(stm) = obj {
-                    let data = rdr.read_stream_data(&stm)?;
+                    let data = rdr.read_stream_data(&stm, &link)?;
                     println!("--v--v--v--");
                     let mut read = 0;
                     let mut special = 0;
