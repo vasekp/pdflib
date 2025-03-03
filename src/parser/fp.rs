@@ -331,9 +331,9 @@ mod tests {
         let entry = fp.entrypoint().unwrap();
         assert_eq!(entry, 1036);
         let mut r = fp.read_raw(entry).unwrap().take(4);
-        let mut s = String::new();
-        r.read_to_string(&mut s).unwrap();
-        assert_eq!(s, "xref");
+        let mut s = Vec::new();
+        r.read_to_end(&mut s).unwrap();
+        assert_eq!(s, b"xref");
 
         let fp = FileParser::new(BufReader::new(File::open("src/tests/offset.pdf").unwrap()));
         let entry = fp.entrypoint().unwrap();
@@ -342,9 +342,9 @@ mod tests {
         assert_eq!(offset, 656);
         let start = entry + offset;
         let mut r = fp.read_raw(start).unwrap().take(4);
-        let mut s = String::new();
-        r.read_to_string(&mut s).unwrap();
-        assert_eq!(s, "xref");
+        let mut s = Vec::new();
+        r.read_to_end(&mut s).unwrap();
+        assert_eq!(s, b"xref");
     }
 
     #[test]

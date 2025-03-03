@@ -196,26 +196,26 @@ mod tests {
         let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x87).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, x87).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "Test 1");
+        assert_eq!(s, b"Test 1");
 
         let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x322).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, x322).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "Test 2");
+        assert_eq!(s, b"Test 2");
 
         let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x510).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, x510).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "Test with diff length");
+        assert_eq!(s, b"Test with diff length");
 
         let rdr = FullReader::new(BufReader::new(File::open("src/tests/circular.pdf").unwrap()));
         assert_eq!(rdr.entry, Some(9));

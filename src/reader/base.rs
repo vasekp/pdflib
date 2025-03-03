@@ -324,49 +324,49 @@ mod tests {
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "123\nendstr");
+        assert_eq!(s, b"123\nendstr");
 
         let source = "1 0 obj <</Length 100>> stream\n123\nendstream endobj";
         let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "123\nendstream endobj");
+        assert_eq!(s, b"123\nendstream endobj");
 
         let source = "1 0 obj <</Length 10>> stream\n123";
         let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "123");
+        assert_eq!(s, b"123");
 
         let source = "1 0 obj <<>> stream\n123\n45endstream endobj";
         let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "123\n45");
+        assert_eq!(s, b"123\n45");
 
         let source = "1 0 obj <<>> stream\n123";
         let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "123");
+        assert_eq!(s, b"123");
     }
 }
