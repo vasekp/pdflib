@@ -1,4 +1,4 @@
-use pdflib::reader::Reader;
+use pdflib::reader::SimpleReader;
 use pdflib::base::*;
 
 use std::io::BufReader;
@@ -13,7 +13,7 @@ fn main() -> Result<(), pdflib::base::Error> {
 
     let fname = std::env::args().nth(1).unwrap_or("tests/basic.pdf".into());
 
-    let rdr = Reader::new(BufReader::new(File::open(fname)?));
+    let rdr = SimpleReader::new(BufReader::new(File::open(fname)?));
     for (objref, res) in rdr.objects() {
         match res {
             Ok((obj, link)) => {
