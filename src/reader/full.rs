@@ -109,7 +109,7 @@ impl Locator for Rc<XRefLink> {
     }
 }
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::io::*;
@@ -147,17 +147,6 @@ mod tests {
         assert_eq!(line, b"1 0 0 -1 0 841.889771 cm");
 
         //etc.
-    }
-
-    #[test]
-    fn test_resolve_deep() {
-        let rdr = FullReader::new(BufReader::new(File::open("src/tests/indirect-filters.pdf").unwrap()));
-        let loc = rdr.base_locator();
-        let obj = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, loc).unwrap();
-        let Object::Stream(Stream { dict, .. }) = obj else { panic!() };
-        let fil = dict.lookup(b"Filter");
-        let res = rdr.resolve_deep(&fil, loc).unwrap();
-        assert_eq!(res, Object::Array(vec![ Object::new_name(b"AsciiHexDecode"), Object::new_name(b"FlateDecode")]));
     }
 
     #[test]
@@ -236,108 +225,4 @@ mod tests {
         // not propagated into the linked list
         assert!(x9.next.is_none());
     }
-
-    #[test]
-    fn test_objstm_caching() {
-        let rdr = FullReader::new(BufReader::new(File::open("src/tests/objstm.pdf").unwrap()));
-        let loc = rdr.base_locator();
-        assert_eq!(loc.locate(&ObjRef { num: 1, gen: 0 }), Some(Record::Compr { num_within: 8, index: 4 }));
-        assert!(rdr.objstms.borrow().is_empty());
-        let obj = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, loc).unwrap();
-        assert_eq!(obj, Object::Dict(Dict(vec![
-            (Name::from(b"Pages"), Object::Ref(ObjRef { num: 9, gen: 0 })),
-            (Name::from(b"Type"), Object::new_name(b"Catalog")),
-        ])));
-
-        let objstms = rdr.objstms.borrow();
-        assert!(!objstms.is_empty());
-        let line = objstms.get(&4973).unwrap().as_ref().unwrap().source.as_slice().read_line_excl().unwrap();
-        assert_eq!(line, b"<</Font<</F1 5 0 R>>/ProcSet[/PDF/Text/ImageC/ImageB/ImageI]>>");
-        drop(objstms);
-
-        let obj2 = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, loc).unwrap();
-        assert_eq!(obj, obj2);
-    }
-
-    #[test]
-    fn test_read_objstm_take() {
-        let source = "1 0 obj <</Type/ObjStm /N 3 /First 11 /Length 14>> stream
-2 0 3 1 4 2614
-endstream endobj";
-        let rdr = FullReader::new(Cursor::new(source));
-        let objstm = rdr.read_objstm(0, &ObjRef { num: 1, gen: 0 }, &()).unwrap();
-        assert_eq!(objstm.entries, vec![(2, 0), (3, 1), (4, 2)]);
-        assert_eq!(objstm.source, b"614");
-
-        struct MockLocator();
-        impl Locator for MockLocator {
-            fn locate(&self, objref: &ObjRef) -> Option<Record> {
-                match objref.num {
-                    1 => Some(Record::Used { gen: 0, offset: 0 }),
-                    2..=4 => Some(Record::Compr { num_within: 1, index: (objref.num as ObjIndex) - 2 }),
-                    _ => panic!()
-                }
-            }
-        }
-        let loc = MockLocator();
-        assert_eq!(rdr.resolve_ref(&ObjRef { num: 2, gen: 0 }, &loc).unwrap(),
-            Object::Number(Number::Int(6)));
-        assert_eq!(rdr.resolve_ref(&ObjRef { num: 3, gen: 0 }, &loc).unwrap(),
-            Object::Number(Number::Int(1)));
-        assert_eq!(rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &loc).unwrap(),
-            Object::Number(Number::Int(4)));
-    }
-
-    #[test]
-    fn test_read_stream_overflow() {
-        let source = "1 0 obj <</Length 10>> stream\n123\nendstream endobj";
-        let rdr = FullReader::new(Cursor::new(source));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
-        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
-        drop(data);
-        assert_eq!(s, "123\nendstr");
-
-        let source = "1 0 obj <</Length 100>> stream\n123\nendstream endobj";
-        let rdr = FullReader::new(Cursor::new(source));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
-        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
-        drop(data);
-        assert_eq!(s, "123\nendstream endobj");
-
-        let source = "1 0 obj <</Length 10>> stream\n123";
-        let rdr = FullReader::new(Cursor::new(source));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
-        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
-        drop(data);
-        assert_eq!(s, "123");
-
-        let source = "1 0 obj <<>> stream\n123\n45endstream endobj";
-        let rdr = FullReader::new(Cursor::new(source));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
-        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
-        drop(data);
-        assert_eq!(s, "123\n45");
-
-        let source = "1 0 obj <<>> stream\n123";
-        let rdr = FullReader::new(Cursor::new(source));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
-        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
-        drop(data);
-        assert_eq!(s, "123");
-    }
-}*/
+}

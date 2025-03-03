@@ -196,141 +196,84 @@ impl<T: BufRead + Seek> Iterator for XRefIterator<'_, T> {
     }
 }
 
-/*#[cfg(test)]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::io::*;
     use std::fs::*;
-    use crate::parser::bp::ByteProvider;
-
-    #[test]
-    fn test_objects_iter() {
-        let rdr = FullReader::new(BufReader::new(File::open("src/tests/basic.pdf").unwrap()));
-        let mut iter = rdr.objects();
-
-        let (oref, res) = iter.next().unwrap();
-        let (obj, link) = res.unwrap();
-        assert_eq!(oref, ObjRef { num: 1, gen: 0 });
-        assert_eq!(obj, Object::Dict(Dict(vec![
-            (Name::from(b"Type"), Object::new_name(b"Pages")),
-            (Name::from(b"Kids"), Object::Array(vec![Object::Ref(ObjRef { num: 2, gen: 0 })])),
-            (Name::from(b"Count"), Object::Number(Number::Int(1))),
-        ])));
-        let kids = rdr.resolve_ref(&ObjRef { num: 2, gen: 0 }, &link).unwrap();
-
-        let (oref, res) = iter.next().unwrap();
-        let (obj, _) = res.unwrap();
-        assert_eq!(oref, ObjRef { num: 2, gen: 0 });
-        assert_eq!(obj, kids);
-
-        let mut iter = iter.skip(1);
-
-        let (oref, res) = iter.next().unwrap();
-        assert_eq!(oref, ObjRef { num: 4, gen: 0 });
-        let (obj, link) = res.unwrap();
-        let Object::Stream(stm) = obj else { panic!() };
-        let mut data = rdr.read_stream_data(&stm, &link).unwrap();
-        let line = data.read_line_excl().unwrap();
-        assert_eq!(line, b"1 0 0 -1 0 841.889771 cm");
-
-        //etc.
-    }
 
     #[test]
     fn test_resolve_deep() {
-        let rdr = FullReader::new(BufReader::new(File::open("src/tests/indirect-filters.pdf").unwrap()));
-        let loc = rdr.base_locator();
-        let obj = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, loc).unwrap();
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/indirect-filters.pdf").unwrap()));
+        let xref = fp.read_xref_at(fp.entrypoint().unwrap()).unwrap();
+        let rdr = BaseReader::new(fp);
+        let obj = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &xref).unwrap();
         let Object::Stream(Stream { dict, .. }) = obj else { panic!() };
         let fil = dict.lookup(b"Filter");
-        let res = rdr.resolve_deep(&fil, loc).unwrap();
+        let res = rdr.resolve_deep(&fil, &xref).unwrap();
         assert_eq!(res, Object::Array(vec![ Object::new_name(b"AsciiHexDecode"), Object::new_name(b"FlateDecode")]));
     }
 
     #[test]
     fn test_xref_chaining() {
-        let rdr = FullReader::new(BufReader::new(File::open("src/tests/hybrid.pdf").unwrap()));
-        assert_eq!(rdr.entry, Some(912));
-        let x912 = rdr.xrefs.get(&912).unwrap();
-        let x759 = rdr.xrefs.get(&759).unwrap();
-        let x417 = rdr.xrefs.get(&417).unwrap();
-        assert_eq!(rdr.base_locator() as *const dyn Locator as *const (),
-            x912 as &dyn Locator as *const dyn Locator as *const ());
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/hybrid.pdf").unwrap()));
+        let mut iter = BaseReader::read_xref_chain(&fp, fp.entrypoint().unwrap());
+        assert_eq!(iter.next().unwrap().0, 912);
         // main table's /XRefStm
-        assert_eq!(Rc::as_ptr(x912.next.as_ref().unwrap()), Rc::as_ptr(&x759));
+        assert_eq!(iter.next().unwrap().0, 759);
         // main table's /Prev
-        assert_eq!(Rc::as_ptr(x759.next.as_ref().unwrap()), Rc::as_ptr(&x417));
-        assert!(x417.next.is_none());
+        assert_eq!(iter.next().unwrap().0, 417);
+        assert!(iter.next().is_none());
 
-        // 912 itself does not define 4 0
-        assert_eq!(x912.curr.locate(&ObjRef { num: 4, gen: 0 }), None);
-        // but should continue looking down the chain
-        assert_eq!(x912.locate(&ObjRef { num: 4, gen: 0 }), Some(Record::Used { gen: 0, offset: 644 }));
-        // 759 does, updating older definition
-        assert_eq!(x759.locate(&ObjRef { num: 4, gen: 0 }), Some(Record::Used { gen: 0, offset: 644 }));
-        // 417's definition is different and shadowed
-        assert_eq!(x417.locate(&ObjRef { num: 4, gen: 0 }), Some(Record::Used { gen: 0, offset: 251 }));
-
-        // 912 defines 6 0
-        assert_eq!(x912.locate(&ObjRef { num: 6, gen: 0 }), Some(Record::Used { gen: 0, offset: 759 }));
-        // 759 does not, though it fits in its /Size
-        assert_eq!(x759.curr.locate(&ObjRef { num: 6, gen: 0 }), None);
-        assert_eq!(x759.locate(&ObjRef { num: 6, gen: 0 }), Some(Record::default()));
-        // 417 has smaller /Size so it should reject right away
-        assert_eq!(x417.curr.locate(&ObjRef { num: 6, gen: 0 }), Some(Record::default()));
-        assert_eq!(x417.locate(&ObjRef { num: 6, gen: 0 }), Some(Record::default()));
-
-        let rdr = FullReader::new(BufReader::new(File::open("src/tests/updates.pdf").unwrap()));
-        assert_eq!(rdr.entry, Some(510));
-        let x510 = rdr.xrefs.get(&510).unwrap();
-        let x322 = rdr.xrefs.get(&322).unwrap();
-        let x87 = rdr.xrefs.get(&87).unwrap();
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/updates.pdf").unwrap()));
+        let mut iter = BaseReader::read_xref_chain(&fp, fp.entrypoint().unwrap());
+        assert_eq!(iter.next().unwrap().0, 510);
         // main table's /Prev
-        assert_eq!(Rc::as_ptr(x510.next.as_ref().unwrap()), Rc::as_ptr(&x322));
+        assert_eq!(iter.next().unwrap().0, 322);
         // /Prev's /Prev
-        assert_eq!(Rc::as_ptr(x322.next.as_ref().unwrap()), Rc::as_ptr(&x87));
-        assert!(x87.next.is_none());
+        assert_eq!(iter.next().unwrap().0, 87);
+        assert!(iter.next().is_none());
+        drop(iter);
 
-        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x87).unwrap()
-            else { panic!() };
-        let mut data = rdr.read_stream_data(&stm, x87).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/circular.pdf").unwrap()));
+        let mut iter = BaseReader::read_xref_chain(&fp, fp.entrypoint().unwrap());
+        assert_eq!(iter.next().unwrap().0, 9);
+        assert_eq!(iter.next().unwrap().0, 9);
+    }
+
+    #[test]
+    fn test_read_stream_data() {
+        // Direct length
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/hybrid.pdf").unwrap()));
+        let rdr = BaseReader::new(fp);
+        let Object::Stream(stm) = rdr.read_uncompressed(251, &ObjRef { num: 4, gen: 0 }).unwrap() else { panic!() };
+        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "Test 1");
+        assert_eq!(s, b"BT /F1 12 Tf 72 720 Td (Hello, PDF 1.5!) Tj ET");
 
-        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x322).unwrap()
-            else { panic!() };
-        let mut data = rdr.read_stream_data(&stm, x322).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
+        // Indirect length - does not exclude the final EOL
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/updates.pdf").unwrap()));
+        let rdr = BaseReader::new(fp);
+        let Object::Stream(stm) = rdr.read_uncompressed(9, &ObjRef { num: 1, gen: 0 }).unwrap() else { panic!() };
+        let mut data = rdr.read_stream_data(&stm, &()).unwrap();
+        let mut s = Vec::new();
+        data.read_to_end(&mut s).unwrap();
         drop(data);
-        assert_eq!(s, "Test 2");
-
-        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x510).unwrap()
-            else { panic!() };
-        let mut data = rdr.read_stream_data(&stm, x510).unwrap();
-        let mut s = String::new();
-        data.read_to_string(&mut s).unwrap();
-        drop(data);
-        assert_eq!(s, "Test with diff length");
-
-        let rdr = FullReader::new(BufReader::new(File::open("src/tests/circular.pdf").unwrap()));
-        assert_eq!(rdr.entry, Some(9));
-        let x9 = rdr.xrefs.get(&9).unwrap();
-        // illegal /Prev (leading to itself)
-        assert_eq!(x9.curr.dict.lookup(b"Prev"), &Object::Number(Number::Int(9)));
-        // not propagated into the linked list
-        assert!(x9.next.is_none());
+        assert_eq!(s, b"Test 1\n");
     }
 
     #[test]
     fn test_objstm_caching() {
-        let rdr = FullReader::new(BufReader::new(File::open("src/tests/objstm.pdf").unwrap()));
-        let loc = rdr.base_locator();
-        assert_eq!(loc.locate(&ObjRef { num: 1, gen: 0 }), Some(Record::Compr { num_within: 8, index: 4 }));
+        use crate::parser::bp::ByteProvider;
+
+        let fp = FileParser::new(BufReader::new(File::open("src/tests/objstm.pdf").unwrap()));
+        let xref = fp.read_xref_at(fp.entrypoint().unwrap()).unwrap();
+        let rdr = BaseReader::new(fp);
+        assert_eq!(xref.locate(&ObjRef { num: 1, gen: 0 }), Some(Record::Compr { num_within: 8, index: 4 }));
         assert!(rdr.objstms.borrow().is_empty());
-        let obj = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, loc).unwrap();
+        let obj = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, &xref).unwrap();
         assert_eq!(obj, Object::Dict(Dict(vec![
             (Name::from(b"Pages"), Object::Ref(ObjRef { num: 9, gen: 0 })),
             (Name::from(b"Type"), Object::new_name(b"Catalog")),
@@ -342,16 +285,15 @@ mod tests {
         assert_eq!(line, b"<</Font<</F1 5 0 R>>/ProcSet[/PDF/Text/ImageC/ImageB/ImageI]>>");
         drop(objstms);
 
-        let obj2 = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, loc).unwrap();
+        let obj2 = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, &xref).unwrap();
         assert_eq!(obj, obj2);
     }
 
     #[test]
     fn test_read_objstm_take() {
         let source = "1 0 obj <</Type/ObjStm /N 3 /First 11 /Length 14>> stream
-2 0 3 1 4 2614
-endstream endobj";
-        let rdr = FullReader::new(Cursor::new(source));
+2 0 3 1 4 2614endstream endobj";
+        let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let objstm = rdr.read_objstm(0, &ObjRef { num: 1, gen: 0 }, &()).unwrap();
         assert_eq!(objstm.entries, vec![(2, 0), (3, 1), (4, 2)]);
         assert_eq!(objstm.source, b"614");
@@ -378,7 +320,7 @@ endstream endobj";
     #[test]
     fn test_read_stream_overflow() {
         let source = "1 0 obj <</Length 10>> stream\n123\nendstream endobj";
-        let rdr = FullReader::new(Cursor::new(source));
+        let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
@@ -388,7 +330,7 @@ endstream endobj";
         assert_eq!(s, "123\nendstr");
 
         let source = "1 0 obj <</Length 100>> stream\n123\nendstream endobj";
-        let rdr = FullReader::new(Cursor::new(source));
+        let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
@@ -398,7 +340,7 @@ endstream endobj";
         assert_eq!(s, "123\nendstream endobj");
 
         let source = "1 0 obj <</Length 10>> stream\n123";
-        let rdr = FullReader::new(Cursor::new(source));
+        let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
@@ -408,7 +350,7 @@ endstream endobj";
         assert_eq!(s, "123");
 
         let source = "1 0 obj <<>> stream\n123\n45endstream endobj";
-        let rdr = FullReader::new(Cursor::new(source));
+        let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
@@ -418,7 +360,7 @@ endstream endobj";
         assert_eq!(s, "123\n45");
 
         let source = "1 0 obj <<>> stream\n123";
-        let rdr = FullReader::new(Cursor::new(source));
+        let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
         let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
             else { panic!() };
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
@@ -427,4 +369,4 @@ endstream endobj";
         drop(data);
         assert_eq!(s, "123");
     }
-}*/
+}
