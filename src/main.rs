@@ -13,13 +13,13 @@ fn main() -> Result<(), pdflib::base::Error> {
 
     let fname = std::env::args().nth(1).unwrap_or("tests/basic.pdf".into());
 
-    let rdr = SimpleReader::new(BufReader::new(File::open(fname)?));
+    let rdr = SimpleReader::new(BufReader::new(File::open(fname)?))?;
     for (objref, res) in rdr.objects() {
         match res {
-            Ok((obj, link)) => {
+            Ok(obj) => {
                 println!("{objref}: {obj}");
                 if let Object::Stream(stm) = obj {
-                    let data = rdr.read_stream_data(&stm, &link)?;
+                    let data = rdr.read_stream_data(&stm)?;
                     println!("--v--v--v--");
                     let mut read = 0;
                     let mut special = 0;

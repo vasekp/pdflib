@@ -12,11 +12,17 @@ pub struct XRef {
     pub size: ObjNum
 }
 
-
 #[derive(Debug)]
 pub enum XRefType {
     Table,
     Stream(ObjRef)
+}
+
+impl XRef {
+    pub fn merge_prev(&mut self, mut prev: XRef) {
+        prev.map.append(&mut self.map);
+        self.map = prev.map;
+    }
 }
 
 
