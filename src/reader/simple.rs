@@ -6,12 +6,21 @@ use crate::parser::FileParser;
 
 use super::base::BaseReader;
 
+/// Allows finding and parsing objects in a PDF file through the cross-reference table.
+///
+/// `SimpleReader` is best suited for well-formed files with a complete and undamaged xref table 
+/// and is designed for performance. Upon construction, it builds the complete xref table from its 
+/// sections for a quick lookup. Object streams are also cached for better performance. Other kinds 
+/// of caching are left to the user.
 pub struct SimpleReader<T: BufRead + Seek> {
     base: BaseReader<T>,
     xref: XRef,
 }
 
 impl<T: BufRead + Seek> SimpleReader<T> {
+    /// Creates a `SimpleReader` instance around a `BufRead + Seek` source.
+    ///
+    /// Returns with an error if the cross-reference table is not found or damaged.
     pub fn new(source: T) -> Result<Self, Error> {
         let parser = FileParser::new(source);
         let entry = parser.entrypoint()?;
@@ -35,6 +44,11 @@ impl<T: BufRead + Seek> SimpleReader<T> {
         Ok(xref)
     }
 
+    /// Iterates over all object numbers marked as used, in increasing number.
+    ///
+    /// Each object is parsed at the moment of retrieval, which can result in an [`Error`]. Such 
+    /// errors usually have no consequences for the subsequent objects, so the iterator can be used 
+    /// further.
     pub fn objects(&self) -> impl Iterator<Item = (ObjRef, Result<Object, Error>)> + '_ {
         self.xref.map.iter()
             .flat_map(move |(&num, rec)| match *rec {
@@ -50,18 +64,35 @@ impl<T: BufRead + Seek> SimpleReader<T> {
             })
     }
 
+    /// Resolves an [`ObjRef`] into an owned [`Object`].
     pub fn resolve_ref(&self, objref: &ObjRef) -> Result<Object, Error> {
         self.base.resolve_ref(objref, &self.xref)
     }
 
+    /// For an [`Object::Ref`], calls [`SimpleReader::resolve_ref()`], otherwise creates a clone.
     pub fn resolve_obj(&self, obj: &Object) -> Result<Object, Error> {
         self.base.resolve_obj(obj, &self.xref)
     }
 
+    /// Resolves indirect references like [`SimpleReader::resolve_obj()`], but also traverses to 
+    /// the first level in [`Object::Array`]s and [`Object::Dict`]s.
     pub fn resolve_deep(&self, obj: &Object) -> Result<Object, Error> {
         self.base.resolve_deep(obj, &self.xref)
     }
 
+    /// Creates a `BufRead` reading stream data for a [`Stream`], after decoding using the values 
+    /// of `/Filter` and `/DecodeParms` from the stream dictionary.
+    ///
+    /// If the length can not be determined (e.g. the `/Length` entry refers to a missing object), 
+    /// the data is read until the first occurrence of the `endstream` keyword. A warning is 
+    /// emitted in such case.
+    ///
+    /// If the filter (or one of the filters) are not implemented, a warning is also emitted and 
+    /// the data is returned in its original encoded form.
+    ///
+    /// Note that this is a mutable borrow of an internal `RefCell`, so in order to prevent runtime 
+    /// borrow checking failures, you may need to manually `drop()` the instance prior to calling 
+    /// any other methods of this `SimpleReader`.
     pub fn read_stream_data(&self, obj: &Stream) -> Result<Box<dyn BufRead + '_>, Error> {
         self.base.read_stream_data(obj, &self.xref)
     }

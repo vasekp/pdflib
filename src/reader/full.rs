@@ -8,6 +8,7 @@ use crate::parser::FileParser;
 
 use super::base::BaseReader;
 
+/// Work in progress.
 pub struct FullReader<T: BufRead + Seek> {
     base: BaseReader<T>,
     xrefs: BTreeMap<Offset, Rc<XRefLink>>,

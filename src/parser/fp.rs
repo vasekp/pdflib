@@ -56,6 +56,10 @@ impl<T: BufRead + Seek> FileParser<T> {
     /// Note that this is a mutable borrow of an internal `RefCell`, so in order to prevent runtime 
     /// borrow checking failures, you may need to manually `drop()` the instance prior to calling 
     /// any other methods of this `FileParser`.
+    ///
+    /// Also note that no length limit or stop condition is imposed, so this instance can be used 
+    /// to read all the way to the end of the input. Use [`std::io::Read::take()`] to limit the 
+    /// number of bytes read.
     pub fn read_raw(&self, pos: Offset) -> Result<impl std::io::BufRead + use<'_, T>, Error> {
         let mut reader = self.reader.borrow_mut();
         reader.seek(std::io::SeekFrom::Start(pos))?;
