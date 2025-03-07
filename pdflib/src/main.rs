@@ -1,8 +1,7 @@
 use pdflib::reader::FullReader;
 use pdflib::base::*;
 
-use std::io::BufReader;
-use std::io::Read;
+use std::io::{BufReader, Read, Cursor, BufRead, Seek};
 use std::fs::File;
 
 fn main() -> Result<(), pdflib::base::Error> {
@@ -11,9 +10,14 @@ fn main() -> Result<(), pdflib::base::Error> {
         .init()
         .unwrap();
 
-    let fname = std::env::args().nth(1).unwrap_or("tests/basic.pdf".into());
+    trait BufReadSeek: BufRead + Seek {}
+    impl<T: BufRead + Seek> BufReadSeek for T {}
+    let buf: Box<dyn BufReadSeek> = match std::env::args().nth(1) {
+        Some(fname) => Box::new(BufReader::new(File::open(fname)?)),
+        None => Box::new(Cursor::new(include_bytes!("tests/basic.pdf"))),
+    };
 
-    let rdr = FullReader::new(BufReader::new(File::open(fname)?));
+    let rdr = FullReader::new(buf);
     for (objref, res) in rdr.objects() {
         match res {
             Ok((obj, link)) => {
