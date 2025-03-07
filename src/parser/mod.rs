@@ -6,4 +6,4 @@ mod fp;
 
 pub use fp::FileParser;
 pub(crate) use tk::Tokenizer;
-pub(crate) use op::ObjParser;
+pub use op::ObjParser;

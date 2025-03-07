@@ -7,7 +7,8 @@ use super::bp::ByteProvider;
 use super::cc::CharClass;
 use super::tk::*;
 
-pub(crate) struct ObjParser<T: BufRead> {
+/// Parses a single PDF object.
+pub struct ObjParser<T: BufRead> {
     reader: T,
     stack: Vec<Token>
 }
@@ -25,6 +26,7 @@ impl<T: BufRead> ObjParser<T> {
         }
     }
 
+    /// Parses a single PDF object.
     pub fn read_obj(reader: &mut T) -> Result<Object, Error> {
         let tk = reader.read_token()?;
         if matches!(tk[..], [b'0'..=b'9' | b'+' | b'-' | b'.', ..]) {
@@ -203,6 +205,7 @@ impl<T: BufRead> ObjParser<T> {
     }
 }
 
+#[doc(hidden)]
 #[cfg(debug_assertions)]
 impl<T: BufRead> Drop for ObjParser<T> {
     fn drop(&mut self) {
@@ -228,9 +231,9 @@ impl TryFrom<Token> for Number {
     }
 }
 
-impl<T: Into<String>> From<T> for ObjParser<Cursor<String>> {
-    fn from(input: T) -> Self {
-        ObjParser::new(Cursor::new(input.into()))
+impl From<&str> for ObjParser<Cursor<String>> {
+    fn from(input: &str) -> Self {
+        ObjParser::new(Cursor::new(input.to_owned()))
     }
 }
 

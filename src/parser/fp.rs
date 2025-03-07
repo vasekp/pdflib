@@ -13,6 +13,7 @@ use super::bp::ByteProvider;
 use super::op::ObjParser;
 use super::tk::Tokenizer;
 
+/// The main interface to a file-level PDF parsing.
 pub struct FileParser<T: BufRead + Seek> {
     reader: RefCell<T>,
     header: Result<Header, Error>,
@@ -24,6 +25,11 @@ pub enum Structural {
 }
 
 impl<T: BufRead + Seek> FileParser<T> {
+    /// Creates a `FileParser` instance with the provided `BufRead`.
+    ///
+    /// Locates the PDF header, determining the PDF version and its byte offset within the stream.
+    /// This information, along with the possible errors) is later available through a call to 
+    /// [`FileParser::header()`].
     pub fn new(mut reader: T) -> Self {
         let header = Self::find_header(&mut reader);
         match &header {
@@ -45,6 +51,11 @@ impl<T: BufRead + Seek> FileParser<T> {
         }
     }
 
+    /// Opens a raw data reader starting at the specified file offset (relative to `%PDF`).
+    ///
+    /// Note that this is a mutable borrow of an internal `RefCell`, so in order to prevent runtime 
+    /// borrow checking failures, you may need to manually `drop()` the instance prior to calling 
+    /// any other methods of this `FileParser`.
     pub fn read_raw(&self, pos: Offset) -> Result<impl std::io::BufRead + use<'_, T>, Error> {
         let mut reader = self.reader.borrow_mut();
         reader.seek(std::io::SeekFrom::Start(pos))?;
@@ -101,10 +112,15 @@ impl<T: BufRead + Seek> FileParser<T> {
         Err(Error::Parse("header not found"))
     }
 
+    /// Returns a reference to the `Result` of locating the PDF file header (during the call to 
+    /// [`FileParser::new()`]).
     pub fn header(&self) -> &Result<Header, Error> {
         &self.header
     }
 
+    /// Tries to locate the cross-reference entry point (`startxref`).
+    ///
+    /// The last 1024 bytes of the byte stream are inspected.
     pub fn entrypoint(&self) -> Result<Offset, Error> {
         let mut reader = self.reader.borrow_mut();
         let len = reader.seek(std::io::SeekFrom::End(0))?;
@@ -170,6 +186,7 @@ impl<T: BufRead + Seek> FileParser<T> {
         }
     }
 
+    /// Attempts to read an indirect object at the specified location (relative to `%PDF`).
     pub fn read_obj_at(&self, pos: Offset) -> Result<(ObjRef, Object), Error> {
         match self.read_at(pos)? {
             Structural::Object(oref, obj) => Ok((oref, obj)),
@@ -177,6 +194,8 @@ impl<T: BufRead + Seek> FileParser<T> {
         }
     }
 
+    /// Attempts to read a cross-reference table section or a cross-reference stream object at the 
+    /// specified location (relative to `%PDF`).
     pub fn read_xref_at(&self, pos: Offset) -> Result<XRef, Error> {
         match self.read_at(pos)? {
             Structural::XRefSec(xref) => Ok(xref),
