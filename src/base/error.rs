@@ -1,5 +1,10 @@
 use std::fmt::{Display, Formatter};
 
+/// The common error type of this library.
+///
+/// Currently, this holds either a [`std::io::Error`] or a static string.
+///
+/// The [`Error::IO`] case is held via a [`std::rc::Rc`] in order for instances to be clone-able.
 #[derive(Debug, Clone)]
 pub enum Error {
     IO(std::rc::Rc<std::io::Error>),

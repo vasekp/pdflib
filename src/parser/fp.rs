@@ -101,6 +101,10 @@ impl<T: BufRead + Seek> FileParser<T> {
         Err(Error::Parse("header not found"))
     }
 
+    pub fn header(&self) -> &Result<Header, Error> {
+        &self.header
+    }
+
     pub fn entrypoint(&self) -> Result<Offset, Error> {
         let mut reader = self.reader.borrow_mut();
         let len = reader.seek(std::io::SeekFrom::End(0))?;
@@ -325,7 +329,7 @@ mod tests {
     #[test]
     fn test_header_entrypoint() {
         let fp = FileParser::new(BufReader::new(File::open("src/tests/basic.pdf").unwrap()));
-        let header = fp.header.as_ref().unwrap();
+        let header = fp.header().as_ref().unwrap();
         assert_eq!(header.start, 0);
         assert_eq!(header.version, (1, 4));
         let entry = fp.entrypoint().unwrap();

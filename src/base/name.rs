@@ -1,11 +1,24 @@
 use std::fmt::{Display, Debug, Formatter};
+use std::ops::Deref;
 
+/// Name objects (e.g., `/Pages`).
+///
+/// Internally a `&[u8]`, to which it dereferences. NB that the leading `'/'` is not a part of the 
+/// name.
 #[derive(PartialEq, Clone)]
-pub struct Name(pub Vec<u8>);
+pub struct Name(pub(crate) Vec<u8>);
 
 impl From<&[u8]> for Name {
     fn from(s: &[u8]) -> Name {
         Name(s.to_owned())
+    }
+}
+
+impl Deref for Name {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 

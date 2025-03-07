@@ -3,10 +3,13 @@ use std::fmt::{Display, Formatter};
 use super::name::Name;
 use super::object::Object;
 
+/// Dictionary objects (like `<< /Length 42 >>`).
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct Dict(pub Vec<(Name, Object)>);
 
 impl Dict {
+    /// Looks up for a value for a given [`Name`] key. If not present, returns a static reference 
+    /// to [`Object::Null`].
     pub fn lookup(&self, key: &[u8]) -> &Object {
         self.0.iter()
             .find(|(name, _obj)| name == &key)

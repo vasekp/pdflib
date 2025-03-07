@@ -102,6 +102,7 @@ impl<T: BufRead + Seek> FullReader<T> {
     }
 }
 
+#[doc(hidden)]
 impl Locator for Rc<XRefLink> {
     fn locate(&self, objref: &ObjRef) -> Option<Record> {
         self.curr.locate(objref)

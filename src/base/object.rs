@@ -7,28 +7,46 @@ use super::string::format_string;
 use super::stream::Stream;
 use super::types::*;
 
+/// The base type of all PDF objects.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Object {
+    /// Bool (`true` or `false`)
     Bool(bool),
+    /// Numbers (integer or real)
     Number(Number),
+    /// Strings.
+    ///
+    /// No distinction is made whether this was literal or hex-encoded in the source.
     String(Vec<u8>),
+    /// Name (like `/Length`)
     Name(Name),
+    /// Array (`[1 2 3]`)
     Array(Vec<Object>),
+    /// Dictionary (`<< /Root 1 0 R >>`)
     Dict(Dict),
+    /// Stream (`<< ... >> stream ... endstream`)
     Stream(Stream),
+    /// Indirect object reference (`3 0 R`)
     Ref(ObjRef),
+    /// Null object (`null`). Also used as a fall-back where the specification says.
     Null
 }
 
 impl Object {
+    /// A utility method to create [`Object::String`] from a byte slice.
     pub fn new_string(s: &[u8]) -> Object {
         Object::String(s.to_owned())
     }
 
+    /// A utility method to create [`Object::Name`] from a byte slice. Don't pass the initial 
+    /// `'/'` unless the name is actually supposed to start with `#2F`.
     pub fn new_name(s: &[u8]) -> Object {
         Object::Name(Name::from(s))
     }
 
+    /// For `Object::Number(Number::Int(number))`, extracts the `number` and casts it into the 
+    /// required type. Returns `None` both for other types of objects and for value too large for the 
+    /// type `T`.
     pub fn num_value<T: TryFrom<i64>>(&self) -> Option<T> {
         match self {
             &Object::Number(Number::Int(num)) => num.try_into().ok(),
@@ -61,6 +79,7 @@ impl Display for Object {
     }
 }
 
+/// An indirect object reference.
 #[derive(PartialEq, Debug, Clone, Copy)]
 pub struct ObjRef {
     pub num: ObjNum,

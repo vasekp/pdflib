@@ -1,7 +1,7 @@
 use std::fmt::Formatter;
 
 //TODO: literal / hex heuristics
-pub fn format_string(f: &mut Formatter<'_>, s: &Vec<u8>) -> std::fmt::Result {
+pub(crate) fn format_string(f: &mut Formatter<'_>, s: &Vec<u8>) -> std::fmt::Result {
     f.write_str("(")?;
     for c in s {
         match c {
