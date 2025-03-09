@@ -185,6 +185,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdfwalk"
+version = "0.1.0"
+dependencies = [
+ "pdflib",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.94"
 source = "registry+https://github.com/rust-lang/crates.io-index"
