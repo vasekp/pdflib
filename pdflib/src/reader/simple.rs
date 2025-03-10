@@ -14,7 +14,7 @@ use super::base::BaseReader;
 /// of caching are left to the user.
 pub struct SimpleReader<T: BufRead + Seek> {
     base: BaseReader<T>,
-    xref: XRef,
+    pub xref: XRef,
 }
 
 impl<T: BufRead + Seek> SimpleReader<T> {
