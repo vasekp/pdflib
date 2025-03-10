@@ -1,10 +1,10 @@
 use pdflib::reader::FullReader;
-use pdflib::base::*;
+use pdflib::*;
 
 use std::io::{BufReader, Read, Cursor, BufRead, Seek};
 use std::fs::File;
 
-fn main() -> Result<(), pdflib::base::Error> {
+fn main() -> Result<(), pdflib::Error> {
     stderrlog::new()
         .verbosity(log::Level::Trace)
         .init()
