@@ -18,7 +18,7 @@ fn main() -> Result<(), pdf::Error> {
     let reader = pdf::reader::SimpleReader::new(BufReader::new(file))?;
     let xref = &reader.xref;
     let mut curr_obj = pdf::Object::Dict(xref.dict.clone());
-    println!("{}", curr_obj);
+    curr_obj.print_indented(0);
 
     //let mut history = vec![];
     for line in std::io::stdin().lines() {
@@ -63,7 +63,7 @@ fn main() -> Result<(), pdf::Error> {
             [p1, p2] => match (p1.parse::<pdf::ObjNum>(), p2.parse::<pdf::ObjGen>()) {
                 (Ok(num), Ok(gen)) => {
                     curr_obj = reader.resolve_ref(&pdf::ObjRef { num, gen })?;
-                    println!("{curr_obj}");
+                    curr_obj.print_indented(0);
                 }
                 _ => {}
             },
@@ -72,4 +72,49 @@ fn main() -> Result<(), pdf::Error> {
     }
 
     Ok(())
+}
+
+trait PrettyPrint {
+    const SPACES: &str = "  ";
+
+    fn print_indented(&self, indent: usize);
+}
+
+impl PrettyPrint for pdf::Object {
+    fn print_indented(&self, indent: usize) {
+        let ind = Self::SPACES.repeat(indent);
+        match self {
+            pdf::Object::Array(arr) => arr.print_indented(indent),
+            pdf::Object::Dict(dict) => dict.print_indented(indent),
+            pdf::Object::Stream(stm) => {
+                stm.dict.print_indented(indent);
+                println!("{ind}[stream]");
+            },
+            obj => println!("{obj}")
+        }
+    }
+}
+
+impl PrettyPrint for Vec<pdf::Object> {
+    fn print_indented(&self, indent: usize) {
+        let ind = Self::SPACES.repeat(indent);
+        println!("[");
+        for item in self {
+            print!("{ind}{}", Self::SPACES);
+            item.print_indented(indent + 1);
+        }
+        println!("{ind}]");
+    }
+}
+
+impl PrettyPrint for pdf::Dict {
+    fn print_indented(&self, indent: usize) {
+        let ind = Self::SPACES.repeat(indent);
+        println!("<<");
+        for (key, val) in &self.0 {
+            print!("{ind}{}{key} ", Self::SPACES);
+            val.print_indented(indent + 1);
+        }
+        println!("{ind}>>");
+   }
 }
