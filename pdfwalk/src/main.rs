@@ -22,6 +22,13 @@ fn main() -> Result<(), pdf::Error> {
     let mut curr_obj = trailer();
     curr_obj.print_indented(0);
 
+    let pdf::Object::Ref(root_ref) = xref.dict.lookup(b"Root") else {
+        return Err(pdf::Error::Parse("Could not find /Root."));
+    };
+    let pdf::Object::Dict(root) = reader.resolve_ref(root_ref)? else {
+        return Err(pdf::Error::Parse("Could not find /Root."));
+    };
+
     for line in std::io::stdin().lines() {
         let line = line?;
         let parts = line.split(' ').collect::<Vec<_>>();
@@ -29,6 +36,11 @@ fn main() -> Result<(), pdf::Error> {
             ["top"] => {
                 history.clear();
                 curr_obj = trailer();
+            },
+            ["root"] => {
+                history.clear();
+                history.push(*root_ref);
+                curr_obj = reader.resolve_ref(root_ref)?;
             },
             ["up"] => {
                 history.pop();
@@ -52,14 +64,23 @@ fn main() -> Result<(), pdf::Error> {
                 std::io::copy(&mut data, &mut stdin)?;
                 cmd.wait()?;
             },
+            ["page", p2] => {
+                let Ok(page_num) = p2.parse::<usize>() else {
+                    log::error!("Malformed page number.");
+                    continue;
+                };
+                let objref = find_page(&reader, &root, page_num)?;
+                curr_obj = reader.resolve_ref(&objref)?;
+                history.push(objref);
+            },
             [p1, p2] => {
-                if let (Ok(num), Ok(gen)) = (p1.parse::<pdf::ObjNum>(), p2.parse::<pdf::ObjGen>()) {
-                    let objref = pdf::ObjRef { num, gen };
-                    curr_obj = reader.resolve_ref(&objref)?;
-                    history.push(objref);
-                } else {
+                let (Ok(num), Ok(gen)) = (p1.parse::<pdf::ObjNum>(), p2.parse::<pdf::ObjGen>()) else {
                     log::error!("Could not parse as a object reference.");
-                }
+                    continue;
+                };
+                let objref = pdf::ObjRef { num, gen };
+                curr_obj = reader.resolve_ref(&objref)?;
+                history.push(objref);
             },
             _ => log::error!("Unknown command.")
         }
@@ -112,4 +133,60 @@ impl PrettyPrint for pdf::Dict {
         }
         println!("{ind}>>");
    }
+}
+
+fn find_page(reader: &pdf::reader::SimpleReader<BufReader<File>>, root: &pdf::Dict,
+    page_num: usize) -> Result<pdf::ObjRef, pdf::Error> {
+    let Some(mut num) = page_num.checked_sub(1) else {
+        return Err(pdf::Error::Parse("Page number out of range."));
+    };
+    let pdf::Object::Ref(mut curr_ref) = root.lookup(b"Pages") else {
+        return Err(pdf::Error::Parse("Could not find /Pages."));
+    };
+    let pdf::Object::Dict(mut curr_node) = reader.resolve_ref(&curr_ref)? else {
+        return Err(pdf::Error::Parse("Could not find /Pages."));
+    };
+    let mut count = curr_node.lookup(b"Count").num_value()
+        .ok_or(pdf::Error::Parse("Could not read page tree."))?;
+    let err = pdf::Error::Parse("Could not read page tree.");
+    loop {
+        if num >= count {
+            return Err(pdf::Error::Parse("Page number out of range."));
+        }
+        let pdf::Object::Array(kids) = reader.resolve_obj(curr_node.lookup(b"Kids"))? else {
+            return Err(err);
+        };
+        if kids.len() == count {
+            let pdf::Object::Ref(objref) = kids[num] else {
+                return Err(err);
+            };
+            return Ok(objref);
+        }
+        for kid in kids {
+            let pdf::Object::Ref(objref) = kid else {
+                return Err(err);
+            };
+            let pdf::Object::Dict(node) = reader.resolve_ref(&objref)? else {
+                return Err(err);
+            };
+            if node.lookup(b"Parent") != &pdf::Object::Ref(curr_ref) {
+                return Err(pdf::Error::Parse("malformed page tree"));
+            }
+            let this_count = match node.lookup(b"Type") {
+                pdf::Object::Name(name) if name == b"Pages" =>
+                    node.lookup(b"Count").num_value()
+                        .ok_or(pdf::Error::Parse("Could not read page tree."))?,
+                pdf::Object::Name(name) if name == b"Page" => 1,
+                _ => return Err(pdf::Error::Parse("malformed page tree"))
+            };
+            if this_count > num {
+                count = this_count;
+                curr_ref = objref;
+                curr_node = node;
+                continue;
+            } else {
+                num -= this_count;
+            }
+        }
+    }
 }
