@@ -17,40 +17,53 @@ fn main() -> Result<(), pdf::Error> {
     let file = File::open(fname)?;
     let reader = pdf::reader::SimpleReader::new(BufReader::new(file))?;
     let xref = &reader.xref;
-    let mut curr_obj = pdf::Object::Dict(xref.dict.clone());
+    let trailer = || pdf::Object::Dict(xref.dict.clone());
+    let mut history = vec![];
+    let mut curr_obj = trailer();
     curr_obj.print_indented(0);
 
-    //let mut history = vec![];
     for line in std::io::stdin().lines() {
         let line = line?;
         let parts = line.split(' ').collect::<Vec<_>>();
         match parts[..] {
-            [p1] => match p1 {
-                "stream" => {
-                    let pdf::Object::Stream(ref stm) = curr_obj else {
-                        log::error!("Not a stream object.");
-                        continue;
-                    };
-                    let mut data = reader.read_stream_data(&stm)?;
-                    let mut cmd = std::process::Command::new("less")
-                        .stdin(std::process::Stdio::piped())
-                        .arg("-R")
-                        .spawn()?;
-                    let mut stdin = cmd.stdin.as_ref().unwrap();
-                    std::io::copy(&mut data, &mut stdin)?;
-                    cmd.wait()?;
-                }
-                _ => {}
+            ["top"] => {
+                history.clear();
+                curr_obj = trailer();
             },
-            [p1, p2] => match (p1.parse::<pdf::ObjNum>(), p2.parse::<pdf::ObjGen>()) {
-                (Ok(num), Ok(gen)) => {
-                    curr_obj = reader.resolve_ref(&pdf::ObjRef { num, gen })?;
-                    curr_obj.print_indented(0);
+            ["up"] => {
+                history.pop();
+                if let Some(objref) = history.last() {
+                    curr_obj = reader.resolve_ref(objref)?;
+                } else {
+                    curr_obj = trailer();
                 }
-                _ => {}
             },
-            _ => {}
+            ["stream"] => {
+                let pdf::Object::Stream(ref stm) = curr_obj else {
+                    log::error!("Not a stream object.");
+                    continue;
+                };
+                let mut data = reader.read_stream_data(stm)?;
+                let mut cmd = std::process::Command::new("less")
+                    .stdin(std::process::Stdio::piped())
+                    .arg("-R")
+                    .spawn()?;
+                let mut stdin = cmd.stdin.as_ref().unwrap();
+                std::io::copy(&mut data, &mut stdin)?;
+                cmd.wait()?;
+            },
+            [p1, p2] => {
+                if let (Ok(num), Ok(gen)) = (p1.parse::<pdf::ObjNum>(), p2.parse::<pdf::ObjGen>()) {
+                    let objref = pdf::ObjRef { num, gen };
+                    curr_obj = reader.resolve_ref(&objref)?;
+                    history.push(objref);
+                } else {
+                    log::error!("Could not parse as a object reference.");
+                }
+            },
+            _ => log::error!("Unknown command.")
         }
+        curr_obj.print_indented(0);
     }
 
     Ok(())
