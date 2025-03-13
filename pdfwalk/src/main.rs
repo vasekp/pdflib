@@ -1,4 +1,4 @@
-use std::io::{BufReader, Read};
+use std::io::BufReader;
 use std::fs::File;
 
 use pdflib as pdf;
@@ -17,59 +17,176 @@ fn main() -> Result<(), pdf::Error> {
     let file = File::open(fname)?;
     let reader = pdf::reader::SimpleReader::new(BufReader::new(file))?;
     let xref = &reader.xref;
-    let mut curr_obj = pdf::Object::Dict(xref.dict.clone());
-    println!("{}", curr_obj);
+    let trailer = || pdf::Object::Dict(xref.dict.clone());
+    let mut history = vec![];
+    let mut curr_obj = trailer();
+    curr_obj.print_indented(0);
 
-    //let mut history = vec![];
+    let pdf::Object::Ref(root_ref) = xref.dict.lookup(b"Root") else {
+        return Err(pdf::Error::Parse("Could not find /Root."));
+    };
+    let pdf::Object::Dict(root) = reader.resolve_ref(root_ref)? else {
+        return Err(pdf::Error::Parse("Could not find /Root."));
+    };
+
     for line in std::io::stdin().lines() {
         let line = line?;
         let parts = line.split(' ').collect::<Vec<_>>();
         match parts[..] {
-            [p1] => match p1 {
-                "stream" => {
-                    let pdf::Object::Stream(ref stm) = curr_obj else {
-                        log::error!("Not a stream object.");
-                        continue;
-                    };
-                    let data = reader.read_stream_data(&stm)?;
-                    let mut read = 0;
-                    let mut special = 0;
-                    let mut need_nl = true;
-                    for c in data.bytes() {
-                        let c = c?;
-                        match c {
-                            0x20..=0x7E | b'\n' => {
-                                print!("{}", c as char);
-                                read += 1;
-                                need_nl = c != b'\n';
-                            },
-                            _ => {
-                                print!("\x1B[7m<{:02x}>\x1B[0m", c);
-                                special += 1;
-                            }
-                        }
-                        if read > 1000 || special > 10 {
-                            println!("...");
-                            need_nl = false;
-                            break;
-                        }
-                    }
-                    if need_nl {
-                        println!();
-                    }
-                }
-                _ => {}
+            ["top"] => {
+                history.clear();
+                curr_obj = trailer();
             },
-            [p1, p2] => match (p1.parse::<pdf::ObjNum>(), p2.parse::<pdf::ObjGen>()) {
-                (Ok(num), Ok(gen)) => {
-                    curr_obj = reader.resolve_ref(&pdf::ObjRef { num, gen })?;
-                    println!("{curr_obj}");
-                }
-                _ => {}
+            ["root"] => {
+                history.clear();
+                history.push(*root_ref);
+                curr_obj = reader.resolve_ref(root_ref)?;
             },
-            _ => {}
+            ["up"] => {
+                history.pop();
+                if let Some(objref) = history.last() {
+                    curr_obj = reader.resolve_ref(objref)?;
+                } else {
+                    curr_obj = trailer();
+                }
+            },
+            ["stream"] => {
+                let pdf::Object::Stream(ref stm) = curr_obj else {
+                    log::error!("Not a stream object.");
+                    continue;
+                };
+                let mut data = reader.read_stream_data(stm)?;
+                let mut cmd = std::process::Command::new("less")
+                    .stdin(std::process::Stdio::piped())
+                    .arg("-R")
+                    .spawn()?;
+                let mut stdin = cmd.stdin.as_ref().unwrap();
+                std::io::copy(&mut data, &mut stdin)?;
+                cmd.wait()?;
+            },
+            ["page", p2] => {
+                let Ok(page_num) = p2.parse::<usize>() else {
+                    log::error!("Malformed page number.");
+                    continue;
+                };
+                let objref = find_page(&reader, &root, page_num)?;
+                curr_obj = reader.resolve_ref(&objref)?;
+                history.push(objref);
+            },
+            [p1, p2] => {
+                let (Ok(num), Ok(gen)) = (p1.parse::<pdf::ObjNum>(), p2.parse::<pdf::ObjGen>()) else {
+                    log::error!("Could not parse as a object reference.");
+                    continue;
+                };
+                let objref = pdf::ObjRef { num, gen };
+                curr_obj = reader.resolve_ref(&objref)?;
+                history.push(objref);
+            },
+            _ => log::error!("Unknown command.")
         }
+        curr_obj.print_indented(0);
     }
 
     Ok(())
+}
+
+trait PrettyPrint {
+    const SPACES: &str = "  ";
+
+    fn print_indented(&self, indent: usize);
+}
+
+impl PrettyPrint for pdf::Object {
+    fn print_indented(&self, indent: usize) {
+        let ind = Self::SPACES.repeat(indent);
+        match self {
+            pdf::Object::Array(arr) => arr.print_indented(indent),
+            pdf::Object::Dict(dict) => dict.print_indented(indent),
+            pdf::Object::Stream(stm) => {
+                stm.dict.print_indented(indent);
+                println!("{ind}[stream]");
+            },
+            obj => println!("{obj}")
+        }
+    }
+}
+
+impl PrettyPrint for Vec<pdf::Object> {
+    fn print_indented(&self, indent: usize) {
+        let ind = Self::SPACES.repeat(indent);
+        println!("[");
+        for item in self {
+            print!("{ind}{}", Self::SPACES);
+            item.print_indented(indent + 1);
+        }
+        println!("{ind}]");
+    }
+}
+
+impl PrettyPrint for pdf::Dict {
+    fn print_indented(&self, indent: usize) {
+        let ind = Self::SPACES.repeat(indent);
+        println!("<<");
+        for (key, val) in &self.0 {
+            print!("{ind}{}{key} ", Self::SPACES);
+            val.print_indented(indent + 1);
+        }
+        println!("{ind}>>");
+   }
+}
+
+fn find_page(reader: &pdf::reader::SimpleReader<BufReader<File>>, root: &pdf::Dict,
+    page_num: usize) -> Result<pdf::ObjRef, pdf::Error> {
+    let Some(mut num) = page_num.checked_sub(1) else {
+        return Err(pdf::Error::Parse("Page number out of range."));
+    };
+    let pdf::Object::Ref(mut curr_ref) = root.lookup(b"Pages") else {
+        return Err(pdf::Error::Parse("Could not find /Pages."));
+    };
+    let pdf::Object::Dict(mut curr_node) = reader.resolve_ref(&curr_ref)? else {
+        return Err(pdf::Error::Parse("Could not find /Pages."));
+    };
+    let mut count = curr_node.lookup(b"Count").num_value()
+        .ok_or(pdf::Error::Parse("Could not read page tree."))?;
+    let err = pdf::Error::Parse("Could not read page tree.");
+    loop {
+        if num >= count {
+            return Err(pdf::Error::Parse("Page number out of range."));
+        }
+        let pdf::Object::Array(kids) = reader.resolve_obj(curr_node.lookup(b"Kids"))? else {
+            return Err(err);
+        };
+        if kids.len() == count {
+            let pdf::Object::Ref(objref) = kids[num] else {
+                return Err(err);
+            };
+            return Ok(objref);
+        }
+        for kid in kids {
+            let pdf::Object::Ref(objref) = kid else {
+                return Err(err);
+            };
+            let pdf::Object::Dict(node) = reader.resolve_ref(&objref)? else {
+                return Err(err);
+            };
+            if node.lookup(b"Parent") != &pdf::Object::Ref(curr_ref) {
+                return Err(pdf::Error::Parse("malformed page tree"));
+            }
+            let this_count = match node.lookup(b"Type") {
+                pdf::Object::Name(name) if name == b"Pages" =>
+                    node.lookup(b"Count").num_value()
+                        .ok_or(pdf::Error::Parse("Could not read page tree."))?,
+                pdf::Object::Name(name) if name == b"Page" => 1,
+                _ => return Err(pdf::Error::Parse("malformed page tree"))
+            };
+            if this_count > num {
+                count = this_count;
+                curr_ref = objref;
+                curr_node = node;
+                continue;
+            } else {
+                num -= this_count;
+            }
+        }
+    }
 }
