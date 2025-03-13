@@ -44,6 +44,97 @@ impl Object {
         Object::Name(Name::from(s))
     }
 
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            &Object::Bool(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_string(&self) -> Option<&Vec<u8>> {
+        match self {
+            Object::String(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_name(&self) -> Option<&Name> {
+        match self {
+            Object::Name(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_array(&self) -> Option<&Vec<Object>> {
+        match self {
+            Object::Array(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_dict(&self) -> Option<&Dict> {
+        match self {
+            Object::Dict(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_stream(&self) -> Option<&Stream> {
+        match self {
+            Object::Stream(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn as_objref(&self) -> Option<&ObjRef> {
+        match self {
+            Object::Ref(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn into_string(self) -> Option<Vec<u8>> {
+        match self {
+            Object::String(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn into_name(self) -> Option<Name> {
+        match self {
+            Object::Name(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn into_array(self) -> Option<Vec<Object>> {
+        match self {
+            Object::Array(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn into_dict(self) -> Option<Dict> {
+        match self {
+            Object::Dict(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn into_stream(self) -> Option<Stream> {
+        match self {
+            Object::Stream(val) => Some(val),
+            _ => None
+        }
+    }
+
+    pub fn into_objref(self) -> Option<ObjRef> {
+        match self {
+            Object::Ref(val) => Some(val),
+            _ => None
+        }
+    }
+
     /// For `Object::Number(Number::Int(number))`, extracts the `number` and casts it into the 
     /// required type. Returns `None` both for other types of objects and for value too large for the 
     /// type `T`.

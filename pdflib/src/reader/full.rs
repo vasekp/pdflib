@@ -143,7 +143,7 @@ mod tests {
         let (oref, res) = iter.next().unwrap();
         assert_eq!(oref, ObjRef { num: 4, gen: 0 });
         let (obj, link) = res.unwrap();
-        let Object::Stream(stm) = obj else { panic!() };
+        let stm = obj.into_stream().unwrap();
         let mut data = rdr.read_stream_data(&stm, &link).unwrap();
         let line = data.read_line_excl().unwrap();
         assert_eq!(line, b"1 0 0 -1 0 841.889771 cm");
@@ -195,24 +195,30 @@ mod tests {
         assert_eq!(Rc::as_ptr(x322.next.as_ref().unwrap()), Rc::as_ptr(&x87));
         assert!(x87.next.is_none());
 
-        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x87).unwrap()
-            else { panic!() };
+        let stm = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x87)
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, x87).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
         drop(data);
         assert_eq!(s, b"Test 1");
 
-        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x322).unwrap()
-            else { panic!() };
+        let stm = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x322)
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, x322).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
         drop(data);
         assert_eq!(s, b"Test 2");
 
-        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x510).unwrap()
-            else { panic!() };
+        let stm = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x510)
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, x510).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();

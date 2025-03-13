@@ -130,8 +130,7 @@ mod tests {
 
         let (oref, res) = iter.next().unwrap();
         assert_eq!(oref, ObjRef { num: 4, gen: 0 });
-        let obj = res.unwrap();
-        let Object::Stream(stm) = obj else { panic!() };
+        let stm = res.unwrap().into_stream().unwrap();
         let mut data = rdr.read_stream_data(&stm).unwrap();
         let line = data.read_line_excl().unwrap();
         assert_eq!(line, b"1 0 0 -1 0 841.889771 cm");
@@ -142,14 +141,20 @@ mod tests {
     #[test]
     fn test_xref_chaining() {
         let rdr = SimpleReader::new(BufReader::new(File::open("src/tests/hybrid.pdf").unwrap())).unwrap();
-        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }).unwrap() else { panic!() };
+        let stm = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 })
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
         assert_eq!(s, b"BT /F1 12 Tf 72 720 Td (Hello, update!) Tj ET");
 
         let rdr = SimpleReader::new(BufReader::new(File::open("src/tests/updates.pdf").unwrap())).unwrap();
-        let Object::Stream(stm) = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }).unwrap() else { panic!() };
+        let stm = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 })
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();

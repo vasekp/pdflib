@@ -170,9 +170,8 @@ impl<T: BufRead + Seek> FileParser<T> {
             b"endobj" =>
                 Ok(Structural::Object(oref, obj)),
             b"stream" => {
-                let Object::Dict(dict) = obj else {
-                    return Err(Error::Parse("endobj not found"))
-                };
+                let dict = obj.into_dict()
+                    .ok_or(Error::Parse("endobj not found"))?;
                 match reader.next_or_eof()? {
                     b'\n' => (),
                     b'\r' => {
@@ -410,8 +409,8 @@ mod tests {
 
         let (oref, obj) = fp.read_obj_at(15).unwrap();
         assert_eq!(oref, ObjRef { num: 4, gen: 0 });
-        let Object::Stream(Stream { data, .. }) = obj else { panic!() };
-        assert_eq!(data, Data::Ref(74));
+        let stm = obj.as_stream().unwrap();
+        assert_eq!(stm.data, Data::Ref(74));
 
         // xref instead of object
         assert!(fp.read_obj_at(1036).is_err());

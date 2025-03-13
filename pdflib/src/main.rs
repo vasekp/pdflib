@@ -1,5 +1,4 @@
 use pdflib::reader::FullReader;
-use pdflib::*;
 
 use std::io::{BufReader, Read, Cursor, BufRead, Seek};
 use std::fs::File;
@@ -22,8 +21,8 @@ fn main() -> Result<(), pdflib::Error> {
         match res {
             Ok((obj, link)) => {
                 println!("{objref}: {obj}");
-                if let Object::Stream(stm) = obj {
-                    let data = rdr.read_stream_data(&stm, &link)?;
+                if let Some(stm) = obj.as_stream() {
+                    let data = rdr.read_stream_data(stm, &link)?;
                     println!("--v--v--v--");
                     let mut read = 0;
                     let mut special = 0;

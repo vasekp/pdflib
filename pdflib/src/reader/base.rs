@@ -87,9 +87,9 @@ impl<T: BufRead + Seek> BaseReader<T> {
     }
 
     fn read_objstm(&self, ostm_offset: Offset, ostm_oref: &ObjRef, locator: &dyn Locator) -> Result<ObjStm, Error> {
-        let Object::Stream(stm) = self.read_uncompressed(ostm_offset, ostm_oref)? else {
-            return Err(Error::Parse("object stream not found"));
-        };
+        let stm = self.read_uncompressed(ostm_offset, ostm_oref)?
+            .into_stream()
+            .ok_or(Error::Parse("object stream not found"))?;
         // FIXME: /Type = /ObjStm
         let count = stm.dict.lookup(b"N").num_value()
             .ok_or(Error::Parse("malformed object stream (/N)"))?;
@@ -207,8 +207,10 @@ mod tests {
         let fp = FileParser::new(BufReader::new(File::open("src/tests/indirect-filters.pdf").unwrap()));
         let xref = fp.read_xref_at(fp.entrypoint().unwrap()).unwrap();
         let rdr = BaseReader::new(fp);
-        let obj = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &xref).unwrap();
-        let Object::Stream(Stream { dict, .. }) = obj else { panic!() };
+        let Stream { dict, ..} = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &xref)
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let fil = dict.lookup(b"Filter");
         let res = rdr.resolve_deep(&fil, &xref).unwrap();
         assert_eq!(res, Object::Array(vec![ Object::new_name(b"AsciiHexDecode"), Object::new_name(b"FlateDecode")]));
@@ -246,7 +248,10 @@ mod tests {
         // Direct length
         let fp = FileParser::new(BufReader::new(File::open("src/tests/hybrid.pdf").unwrap()));
         let rdr = BaseReader::new(fp);
-        let Object::Stream(stm) = rdr.read_uncompressed(251, &ObjRef { num: 4, gen: 0 }).unwrap() else { panic!() };
+        let stm = rdr.read_uncompressed(251, &ObjRef { num: 4, gen: 0 })
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
@@ -256,7 +261,10 @@ mod tests {
         // Indirect length - does not exclude the final EOL
         let fp = FileParser::new(BufReader::new(File::open("src/tests/updates.pdf").unwrap()));
         let rdr = BaseReader::new(fp);
-        let Object::Stream(stm) = rdr.read_uncompressed(9, &ObjRef { num: 1, gen: 0 }).unwrap() else { panic!() };
+        let stm = rdr.read_uncompressed(9, &ObjRef { num: 1, gen: 0 })
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
@@ -321,8 +329,10 @@ mod tests {
     fn test_read_stream_overflow() {
         let source = "1 0 obj <</Length 10>> stream\n123\nendstream endobj";
         let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
+        let stm = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 })
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
@@ -331,8 +341,10 @@ mod tests {
 
         let source = "1 0 obj <</Length 100>> stream\n123\nendstream endobj";
         let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
+        let stm = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 })
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
@@ -341,8 +353,10 @@ mod tests {
 
         let source = "1 0 obj <</Length 10>> stream\n123";
         let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
+        let stm = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 })
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
@@ -351,8 +365,10 @@ mod tests {
 
         let source = "1 0 obj <<>> stream\n123\n45endstream endobj";
         let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
+        let stm = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 })
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
@@ -361,8 +377,10 @@ mod tests {
 
         let source = "1 0 obj <<>> stream\n123";
         let rdr = BaseReader::new(FileParser::new(Cursor::new(source)));
-        let Object::Stream(stm) = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 }).unwrap()
-            else { panic!() };
+        let stm = rdr.read_uncompressed(0, &ObjRef { num: 1, gen: 0 })
+            .unwrap()
+            .into_stream()
+            .unwrap();
         let mut data = rdr.read_stream_data(&stm, &()).unwrap();
         let mut s = Vec::new();
         data.read_to_end(&mut s).unwrap();
