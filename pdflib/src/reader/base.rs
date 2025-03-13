@@ -243,13 +243,17 @@ mod tests {
         let fp = FileParser::new(BufReader::new(File::open("src/tests/indirect-filters.pdf").unwrap()));
         let xref = fp.read_xref_at(fp.entrypoint().unwrap()).unwrap();
         let rdr = BaseReader::new(fp);
-        let Stream { dict, ..} = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &xref)
+        let stm = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &xref)
             .unwrap()
             .into_stream()
             .unwrap();
-        let fil = dict.lookup(b"Filter");
-        let res = rdr.resolve_filters(fil, &xref).unwrap();
-        assert_eq!(res, vec![ Filter::AsciiHex, Filter::Flate ]);
+        let fil = rdr.resolve_filters(stm.dict.lookup(b"Filter"), &xref).unwrap();
+        assert_eq!(fil, vec![ Filter::AsciiHex, Filter::Flate ]);
+
+        let mut data = rdr.read_stream_data(&stm, &xref).unwrap();
+        let mut s = String::new();
+        data.read_to_string(&mut s).unwrap();
+        assert_eq!(s, "test");
     }
 
     #[test]
