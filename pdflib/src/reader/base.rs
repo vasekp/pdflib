@@ -170,9 +170,9 @@ impl<T: BufRead + Seek> BaseReader<T> {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
         let len = self.resolve_obj(obj.dict.lookup(b"Length").to_owned(), locator)?.num_value();
         let filters = self.resolve_filters(obj.dict.lookup(b"Filter"), locator)?;
-        let params = match obj.dict.lookup(b"DecodeParms") {
-            Object::Dict(dict) => Some(dict),
-            &Object::Null => None,
+        let params = match *obj.dict.lookup(b"DecodeParms") {
+            Object::Dict(ref dict) => Some(dict),
+            Object::Null => None,
             _ => return Err(Error::Parse("malformed /DecodeParms"))
         };
         let reader = self.parser.read_raw(offset)?;
@@ -248,7 +248,7 @@ mod tests {
             .unwrap();
         let fil = dict.lookup(b"Filter");
         let res = rdr.resolve_filters(fil, &xref).unwrap();
-        assert_eq!(res, vec![ Filter::AsciiHex, Filter::Flate]);
+        assert_eq!(res, vec![ Filter::AsciiHex, Filter::Flate ]);
     }
 
     #[test]
