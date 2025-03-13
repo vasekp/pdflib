@@ -90,11 +90,11 @@ impl<T: BufRead + Seek> FullReader<T> {
         self.base.resolve_ref(objref, locator)
     }
 
-    pub fn resolve_obj(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
+    pub fn resolve_obj(&self, obj: Object, locator: &dyn Locator) -> Result<Object, Error> {
         self.base.resolve_obj(obj, locator)
     }
 
-    pub fn resolve_deep(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
+    pub fn resolve_deep(&self, obj: Object, locator: &dyn Locator) -> Result<Object, Error> {
         self.base.resolve_deep(obj, locator)
     }
 

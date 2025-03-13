@@ -39,10 +39,10 @@ impl<T: BufRead + Seek> BaseReader<T> {
         }
     }
 
-    pub fn resolve_obj(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
+    pub fn resolve_obj(&self, obj: Object, locator: &dyn Locator) -> Result<Object, Error> {
         match obj {
-            Object::Ref(objref) => self.resolve_ref(objref, locator),
-            _ => Ok(obj.to_owned())
+            Object::Ref(objref) => self.resolve_ref(&objref, locator),
+            _ => Ok(obj)
         }
     }
 
@@ -114,16 +114,16 @@ impl<T: BufRead + Seek> BaseReader<T> {
         Ok(ObjStm { entries, source })
     }
 
-    pub fn resolve_deep(&self, obj: &Object, locator: &dyn Locator) -> Result<Object, Error> {
+    pub fn resolve_deep(&self, obj: Object, locator: &dyn Locator) -> Result<Object, Error> {
         Ok(match self.resolve_obj(obj, locator)? {
             Object::Array(arr) =>
                 Object::Array(arr.into_iter()
-                    .map(|obj| self.resolve_obj(&obj, locator))
+                    .map(|obj| self.resolve_obj(obj, locator))
                     .collect::<Result<Vec<_>, _>>()?),
             Object::Dict(dict) =>
                 Object::Dict(Dict::from(dict.into_iter()
                     .map(|(name, obj)| -> Result<(Name, Object), Error> {
-                        Ok((name, self.resolve_obj(&obj, locator)?))
+                        Ok((name, self.resolve_obj(obj, locator)?))
                     })
                     .collect::<Result<Vec<_>, _>>()?)),
             obj => obj
@@ -133,8 +133,8 @@ impl<T: BufRead + Seek> BaseReader<T> {
     pub fn read_stream_data(&self, obj: &Stream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error>
     {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
-        let len = self.resolve_obj(obj.dict.lookup(b"Length"), locator)?.num_value();
-        let filters = self.resolve_deep(obj.dict.lookup(b"Filter"), locator)?;
+        let len = self.resolve_obj(obj.dict.lookup(b"Length").to_owned(), locator)?.num_value();
+        let filters = self.resolve_deep(obj.dict.lookup(b"Filter").to_owned(), locator)?;
         let params = match obj.dict.lookup(b"DecodeParms") {
             Object::Dict(dict) => Some(dict),
             &Object::Null => None,
@@ -212,7 +212,7 @@ mod tests {
             .into_stream()
             .unwrap();
         let fil = dict.lookup(b"Filter");
-        let res = rdr.resolve_deep(&fil, &xref).unwrap();
+        let res = rdr.resolve_deep(fil.to_owned(), &xref).unwrap();
         assert_eq!(res, Object::Array(vec![ Object::new_name(b"AsciiHexDecode"), Object::new_name(b"FlateDecode")]));
     }
 

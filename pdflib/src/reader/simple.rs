@@ -69,14 +69,15 @@ impl<T: BufRead + Seek> SimpleReader<T> {
         self.base.resolve_ref(objref, &self.xref)
     }
 
-    /// For an [`Object::Ref`], calls [`SimpleReader::resolve_ref()`], otherwise creates a clone.
-    pub fn resolve_obj(&self, obj: &Object) -> Result<Object, Error> {
+    /// For an [`Object::Ref`], calls [`SimpleReader::resolve_ref()`], otherwise returns `obj` 
+    /// unchanged.
+    pub fn resolve_obj(&self, obj: Object) -> Result<Object, Error> {
         self.base.resolve_obj(obj, &self.xref)
     }
 
     /// Resolves indirect references like [`SimpleReader::resolve_obj()`], but also traverses to 
     /// the first level in [`Object::Array`]s and [`Object::Dict`]s.
-    pub fn resolve_deep(&self, obj: &Object) -> Result<Object, Error> {
+    pub fn resolve_deep(&self, obj: Object) -> Result<Object, Error> {
         self.base.resolve_deep(obj, &self.xref)
     }
 

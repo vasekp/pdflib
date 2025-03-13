@@ -151,7 +151,7 @@ fn find_page(reader: &pdf::reader::SimpleReader<BufReader<File>>, root: &pdf::Di
         if num >= count {
             return Err(pdf::Error::Parse("Page number out of range."));
         }
-        let kids = reader.resolve_obj(curr_node.lookup(b"Kids"))?.into_array().ok_or(err())?;
+        let kids = reader.resolve_obj(curr_node.lookup(b"Kids").to_owned())?.into_array().ok_or(err())?;
         if kids.len() == count {
             return Ok(*kids[num].as_objref().ok_or(err())?);
         }
