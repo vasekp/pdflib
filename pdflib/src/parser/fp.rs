@@ -281,7 +281,16 @@ impl<T: BufRead + Seek> FileParser<T> {
         let len = dict.lookup(b"Length")
             .num_value()
             .ok_or(Error::Parse("malfomed xref stream (/Length)"))?;
-        let filters = codecs::to_filters(dict.lookup(b"Filter"))?;
+        let filters = match dict.lookup(b"Filter") {
+            Object::Name(name) => Ok(vec![name.try_into()?]),
+            Object::Array(vec) => vec.iter()
+                .map(|obj| obj.as_name()
+                    .ok_or(Error::Parse("malformed /Filter"))?
+                    .try_into())
+                .collect::<Result<Vec<_>, _>>(),
+            Object::Null => Ok(vec![]),
+            _ => Err(Error::Parse("malformed /Filter"))
+        }?;
         let params = match dict.lookup(b"DecodeParms") {
             Object::Dict(dict) => Some(dict),
             &Object::Null => None,
