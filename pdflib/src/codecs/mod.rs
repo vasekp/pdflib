@@ -17,12 +17,11 @@ impl TryFrom<&Name> for Filter {
     type Error = Error;
 
     fn try_from(name: &Name) -> Result<Filter, Error> {
-        if name == b"FlateDecode" {
-            Ok(Filter::Flate)
-        } else if name == b"ASCIIHexDecode" {
-            Ok(Filter::AsciiHex)
-        } else {
-            Err(Error::Parse("unimplemented filter"))
+        use std::ops::Deref;
+        match name.deref() {
+            b"FlateDecode" => Ok(Filter::Flate),
+            b"ASCIIHexDecode" => Ok(Filter::AsciiHex),
+            _ => Err(Error::Parse("unimplemented filter"))
         }
     }
 }

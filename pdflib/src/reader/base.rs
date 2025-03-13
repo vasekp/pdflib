@@ -122,7 +122,8 @@ impl<T: BufRead + Seek> BaseReader<T> {
                     .map(|obj| self.resolve_obj(obj, locator))
                     .collect::<Result<Vec<_>, _>>()?),
             Object::Dict(dict) =>
-                Object::Dict(Dict::from(dict.into_iter()
+                Object::Dict(Dict::from(dict.into_inner()
+                    .into_iter()
                     .map(|(name, obj)| -> Result<(Name, Object), Error> {
                         Ok((name, self.resolve_obj(obj, locator)?))
                     })

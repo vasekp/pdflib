@@ -125,9 +125,10 @@ impl PrettyPrint for Vec<pdf::Object> {
 
 impl PrettyPrint for pdf::Dict {
     fn print_indented(&self, indent: usize) {
+        use std::ops::Deref;
         let ind = Self::SPACES.repeat(indent);
         println!("<<");
-        for (key, val) in self {
+        for (key, val) in self.deref() {
             print!("{ind}{}{key} ", Self::SPACES);
             val.print_indented(indent + 1);
         }
@@ -161,12 +162,16 @@ fn find_page(reader: &pdf::reader::SimpleReader<BufReader<File>>, root: &pdf::Di
             if node.lookup(b"Parent") != &pdf::Object::Ref(curr_ref) {
                 return Err(pdf::Error::Parse("malformed page tree"));
             }
-            let this_count = match node.lookup(b"Type") {
-                pdf::Object::Name(name) if name == b"Pages" =>
-                    node.lookup(b"Count").num_value()
-                        .ok_or(pdf::Error::Parse("Could not read page tree."))?,
-                pdf::Object::Name(name) if name == b"Page" => 1,
-                _ => return Err(pdf::Error::Parse("malformed page tree"))
+            use std::ops::Deref;
+            let this_count = match node.lookup(b"Type")
+                .as_name()
+                .ok_or(pdf::Error::Parse("malformed page tree"))?
+                .deref() {
+                    b"Pages" =>
+                        node.lookup(b"Count").num_value()
+                            .ok_or(pdf::Error::Parse("Could not read page tree."))?,
+                    b"Page" => 1,
+                    _ => return Err(pdf::Error::Parse("malformed page tree"))
             };
             if this_count > num {
                 count = this_count;

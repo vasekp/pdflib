@@ -16,6 +16,11 @@ impl Dict {
             .map(|(_name, obj)| obj)
             .unwrap_or(&Object::Null)
     }
+
+    /// Consumes this `Dict` and returns its inner representation.
+    pub fn into_inner(self) -> Vec<(Name, Object)> {
+        self.0
+    }
 }
 
 impl From<Vec<(Name, Object)>> for Dict {
@@ -24,21 +29,11 @@ impl From<Vec<(Name, Object)>> for Dict {
     }
 }
 
-impl IntoIterator for Dict {
-    type Item = (Name, Object);
-    type IntoIter = <Vec<(Name, Object)> as IntoIterator>::IntoIter;
+impl std::ops::Deref for Dict {
+    type Target = Vec<(Name, Object)>;
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl<'a> IntoIterator for &'a Dict {
-    type Item = &'a (Name, Object);
-    type IntoIter = std::slice::Iter<'a, (Name, Object)>;
-
-    fn into_iter(self: &'a Dict) -> Self::IntoIter {
-        self.0.iter()
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
