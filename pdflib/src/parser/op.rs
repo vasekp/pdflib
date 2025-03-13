@@ -201,7 +201,7 @@ impl<T: BufRead> ObjParser<T> {
             let value = self.read_obj_inner()?;
             dict.push((key, value));
         }
-        Ok(Object::Dict(Dict(dict)))
+        Ok(Object::Dict(Dict::from(dict)))
     }
 }
 
@@ -382,13 +382,13 @@ are the same.) (These two strings are the same.)");
         /VeryLastItem (OK)
         >>
     >>");
-        assert_eq!(parser.read_obj_inner().unwrap(), Object::Dict(Dict(vec![
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Dict(Dict::from(vec![
             (Name::from(b"Type"), Object::new_name(b"Example")),
             (Name::from(b"Subtype"), Object::new_name(b"DictionaryExample")),
             (Name::from(b"Version"), Object::Number(Number::Real(0.01))),
             (Name::from(b"IntegerItem"), Object::Number(Number::Int(12))),
             (Name::from(b"StringItem"), Object::new_string(b"a string")),
-            (Name::from(b"Subdictionary"), Object::Dict(Dict(vec![
+            (Name::from(b"Subdictionary"), Object::Dict(Dict::from(vec![
                 (Name::from(b"Item1"), Object::Number(Number::Real(0.4))),
                 (Name::from(b"Item2"), Object::Bool(true)),
                 (Name::from(b"LastItem"), Object::new_string(b"not !")),
@@ -397,13 +397,13 @@ are the same.) (These two strings are the same.)");
         ])));
 
         let mut parser = ObjParser::from("<<>>");
-        assert_eq!(parser.read_obj_inner().unwrap(), Object::Dict(Dict(vec![])));
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Dict(Dict::from(vec![])));
     }
 
     #[test]
     fn test_read_indirect() {
         let mut parser = ObjParser::from("<</Length 8 0 R>>");
-        assert_eq!(parser.read_obj_inner().unwrap(), Object::Dict(Dict(vec![
+        assert_eq!(parser.read_obj_inner().unwrap(), Object::Dict(Dict::from(vec![
             (Name::from(b"Length"), Object::Ref(ObjRef{num: 8, gen: 0}))
         ])));
 
@@ -443,7 +443,7 @@ are the same.) (These two strings are the same.)");
             Object::Number(Number::Int(1)));
 
         assert_eq!(ObjParser::read_obj(&mut Cursor::new("<</Length 8 0 R>>")).unwrap(),
-            Object::Dict(Dict(vec![
+            Object::Dict(Dict::from(vec![
                 (Name::from(b"Length"), Object::Ref(ObjRef{num: 8, gen: 0}))
             ])));
 

@@ -127,7 +127,7 @@ impl PrettyPrint for pdf::Dict {
     fn print_indented(&self, indent: usize) {
         let ind = Self::SPACES.repeat(indent);
         println!("<<");
-        for (key, val) in &self.0 {
+        for (key, val) in self {
             print!("{ind}{}{key} ", Self::SPACES);
             val.print_indented(indent + 1);
         }

@@ -126,7 +126,7 @@ mod tests {
         let (oref, res) = iter.next().unwrap();
         let (obj, link) = res.unwrap();
         assert_eq!(oref, ObjRef { num: 1, gen: 0 });
-        assert_eq!(obj, Object::Dict(Dict(vec![
+        assert_eq!(obj, Object::Dict(Dict::from(vec![
             (Name::from(b"Type"), Object::new_name(b"Pages")),
             (Name::from(b"Kids"), Object::Array(vec![Object::Ref(ObjRef { num: 2, gen: 0 })])),
             (Name::from(b"Count"), Object::Number(Number::Int(1))),

@@ -115,13 +115,13 @@ mod tests {
                 Object::new_name(b"SomeName")
         ])), "[ 549 3.14 false (Ralph) /SomeName ]");
         assert_eq!(format!("{}", Object::Array(vec![Object::Array(vec![Object::Bool(true)])])), "[ [ true ] ]");
-        assert_eq!(format!("{}", Object::Dict(Dict(vec![
+        assert_eq!(format!("{}", Object::Dict(Dict::from(vec![
             (Name::from(b"Type"), Object::new_name(b"Example")),
             (Name::from(b"Subtype"), Object::new_name(b"DictionaryExample")),
             (Name::from(b"Version"), Object::Number(Number::Real(0.01))),
             (Name::from(b"IntegerItem"), Object::Number(Number::Int(12))),
             (Name::from(b"StringItem"), Object::new_string(b"a string")),
-            (Name::from(b"Subdictionary"), Object::Dict(Dict(vec![
+            (Name::from(b"Subdictionary"), Object::Dict(Dict::from(vec![
                 (Name::from(b"Item1"), Object::Number(Number::Real(0.4))),
                 (Name::from(b"Item2"), Object::Bool(true)),
                 (Name::from(b"LastItem"), Object::new_string(b"not !")),
@@ -130,7 +130,7 @@ mod tests {
         ]))), "<< /Type /Example /Subtype /DictionaryExample /Version 0.01 /IntegerItem 12 \
         /StringItem (a string) /Subdictionary << /Item1 0.4 /Item2 true /LastItem (not !) \
         /VeryLastItem (OK) >> >>");
-        assert_eq!(format!("{}", Object::Dict(Dict(vec![
+        assert_eq!(format!("{}", Object::Dict(Dict::from(vec![
             (Name::from(b"Length"), Object::Ref(ObjRef{num: 8, gen: 0}))]))), "<< /Length 8 0 R >>");
     }
 }

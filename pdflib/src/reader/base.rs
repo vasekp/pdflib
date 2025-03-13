@@ -121,7 +121,7 @@ impl<T: BufRead + Seek> BaseReader<T> {
                     .map(|obj| self.resolve_obj(&obj, locator))
                     .collect::<Result<Vec<_>, _>>()?),
             Object::Dict(dict) =>
-                Object::Dict(Dict(dict.0.into_iter()
+                Object::Dict(Dict::from(dict.into_iter()
                     .map(|(name, obj)| -> Result<(Name, Object), Error> {
                         Ok((name, self.resolve_obj(&obj, locator)?))
                     })
@@ -274,7 +274,7 @@ mod tests {
         assert_eq!(xref.locate(&ObjRef { num: 1, gen: 0 }), Some(Record::Compr { num_within: 8, index: 4 }));
         assert!(rdr.objstms.borrow().is_empty());
         let obj = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, &xref).unwrap();
-        assert_eq!(obj, Object::Dict(Dict(vec![
+        assert_eq!(obj, Object::Dict(Dict::from(vec![
             (Name::from(b"Pages"), Object::Ref(ObjRef { num: 9, gen: 0 })),
             (Name::from(b"Type"), Object::new_name(b"Catalog")),
         ])));
