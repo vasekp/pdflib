@@ -1,5 +1,6 @@
 mod flate;
 mod asciihex;
+mod ascii85;
 
 use crate::base::*;
 use std::io::BufRead;
@@ -11,6 +12,8 @@ pub enum Filter {
     Flate(Dict),
     /// `/ASCIIHexDecode`
     AsciiHex,
+    /// `ASCII85Decode`
+    Ascii85,
 }
 
 impl Filter {
@@ -23,6 +26,12 @@ impl Filter {
                     log::warn!("Ingoring /DecodeParms for /ASCIIHexDecode.");
                 }
                 Ok(Filter::AsciiHex)
+            },
+            b"ASCII85Decode" => {
+                if params.is_some() {
+                    log::warn!("Ingoring /DecodeParms for /ASCIIHexDecode.");
+                }
+                Ok(Filter::Ascii85)
             },
             _ => Err(Error::Parse("unimplemented filter"))
         }
@@ -39,6 +48,7 @@ pub fn decode<'a, R: BufRead + 'a>(input: R, filter: &[Filter]) -> Box<dyn BufRe
         [] => Box::new(input),
         [Filter::Flate(params)] => flate::decode(input, params),
         [Filter::AsciiHex] => Box::new(asciihex::decode(input)),
+        [Filter::Ascii85] => Box::new(ascii85::decode(input)),
         [_, ..] => decode(decode(input, &filter[..1]), &filter[1..]),
     }
 }
