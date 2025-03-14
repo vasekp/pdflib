@@ -84,7 +84,7 @@ impl<T: BufRead + Seek> SimpleReader<T> {
 
 impl<T: BufRead + Seek> Resolver for SimpleReader<T> {
     fn resolve_ref(&self, objref: &ObjRef) -> Result<Object, Error> {
-        self.base.resolve_ref(objref, &self.xref)
+        self.base.resolve(objref, &self.xref)
     }
 }
 

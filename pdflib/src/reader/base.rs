@@ -31,18 +31,11 @@ impl<T: BufRead + Seek> BaseReader<T> {
         XRefIterator::new(parser, entry)
     }
 
-    pub fn resolve_ref(&self, objref: &ObjRef, locator: &dyn Locator) -> Result<Object, Error> {
+    pub fn resolve(&self, objref: &ObjRef, locator: &dyn Locator) -> Result<Object, Error> {
         match locator.locate(objref) {
             Some(Record::Used { offset, .. }) => self.read_uncompressed(offset, objref),
             Some(Record::Compr { num_within, index }) => self.read_compressed(num_within, index, locator, objref),
             _ => Ok(Object::Null)
-        }
-    }
-
-    pub fn resolve_obj(&self, obj: Object, locator: &dyn Locator) -> Result<Object, Error> {
-        match obj {
-            Object::Ref(objref) => self.resolve_ref(&objref, locator),
-            _ => Ok(obj)
         }
     }
 
@@ -114,28 +107,11 @@ impl<T: BufRead + Seek> BaseReader<T> {
         Ok(ObjStm { entries, source })
     }
 
-    pub fn resolve_deep(&self, obj: Object, locator: &dyn Locator) -> Result<Object, Error> {
-        Ok(match self.resolve_obj(obj, locator)? {
-            Object::Array(arr) =>
-                Object::Array(arr.into_iter()
-                    .map(|obj| self.resolve_obj(obj, locator))
-                    .collect::<Result<Vec<_>, _>>()?),
-            Object::Dict(dict) =>
-                Object::Dict(Dict::from(dict.into_inner()
-                    .into_iter()
-                    .map(|(name, obj)| -> Result<(Name, Object), Error> {
-                        Ok((name, self.resolve_obj(obj, locator)?))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?)),
-            obj => obj
-        })
-    }
-
     pub fn read_stream_data(&self, obj: &Stream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error>
     {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
         let res = BorrowedResolver { reader: self, locator };
-        let len = self.resolve_obj(obj.dict.lookup(b"Length").to_owned(), locator)?.num_value();
+        let len = res.resolve_obj(obj.dict.lookup(b"Length").to_owned())?.num_value();
         let filters = codecs::parse_filters(&obj.dict, &res)?;
         let params = match *obj.dict.lookup(b"DecodeParms") {
             Object::Dict(ref dict) => Some(dict),
@@ -198,14 +174,14 @@ impl<T: BufRead + Seek> Iterator for XRefIterator<'_, T> {
     }
 }
 
-struct BorrowedResolver<'a, T: BufRead + Seek> {
-    reader: &'a BaseReader<T>,
-    locator: &'a dyn Locator,
+pub(crate) struct BorrowedResolver<'a, T: BufRead + Seek> {
+    pub reader: &'a BaseReader<T>,
+    pub locator: &'a dyn Locator,
 }
 
 impl<T: BufRead + Seek> Resolver for BorrowedResolver<'_, T> {
     fn resolve_ref(&self, objref: &ObjRef) -> Result<Object, Error> {
-        self.reader.resolve_ref(objref, self.locator)
+        self.reader.resolve(objref, self.locator)
     }
 }
 
@@ -222,11 +198,12 @@ mod tests {
         let fp = FileParser::new(BufReader::new(File::open("src/tests/indirect-filters.pdf").unwrap()));
         let xref = fp.read_xref_at(fp.entrypoint().unwrap()).unwrap();
         let rdr = BaseReader::new(fp);
-        let stm = rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &xref)
+        let res = BorrowedResolver { reader: &rdr, locator: &xref };
+        let stm = res.resolve_ref(&ObjRef { num: 4, gen: 0 })
             .unwrap()
             .into_stream()
             .unwrap();
-        let fil = rdr.resolve_filters(stm.dict.lookup(b"Filter"), &xref).unwrap();
+        let fil = codecs::parse_filters(&stm.dict, &res).unwrap();
         assert_eq!(fil, vec![ Filter::AsciiHex, Filter::Flate ]);
 
         let mut data = rdr.read_stream_data(&stm, &xref).unwrap();
@@ -298,9 +275,10 @@ mod tests {
         let fp = FileParser::new(BufReader::new(File::open("src/tests/objstm.pdf").unwrap()));
         let xref = fp.read_xref_at(fp.entrypoint().unwrap()).unwrap();
         let rdr = BaseReader::new(fp);
+        let res = BorrowedResolver { reader: &rdr, locator: &xref };
         assert_eq!(xref.locate(&ObjRef { num: 1, gen: 0 }), Some(Record::Compr { num_within: 8, index: 4 }));
         assert!(rdr.objstms.borrow().is_empty());
-        let obj = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, &xref).unwrap();
+        let obj = res.resolve_ref(&ObjRef { num: 1, gen: 0 }).unwrap();
         assert_eq!(obj, Object::Dict(Dict::from(vec![
             (Name::from(b"Pages"), Object::Ref(ObjRef { num: 9, gen: 0 })),
             (Name::from(b"Type"), Object::new_name(b"Catalog")),
@@ -312,7 +290,7 @@ mod tests {
         assert_eq!(line, b"<</Font<</F1 5 0 R>>/ProcSet[/PDF/Text/ImageC/ImageB/ImageI]>>");
         drop(objstms);
 
-        let obj2 = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, &xref).unwrap();
+        let obj2 = res.resolve_ref(&ObjRef { num: 1, gen: 0 }).unwrap();
         assert_eq!(obj, obj2);
     }
 
@@ -336,11 +314,12 @@ mod tests {
             }
         }
         let loc = MockLocator();
-        assert_eq!(rdr.resolve_ref(&ObjRef { num: 2, gen: 0 }, &loc).unwrap(),
+        let res = BorrowedResolver { reader: &rdr, locator: &loc };
+        assert_eq!(res.resolve_ref(&ObjRef { num: 2, gen: 0 }).unwrap(),
             Object::Number(Number::Int(6)));
-        assert_eq!(rdr.resolve_ref(&ObjRef { num: 3, gen: 0 }, &loc).unwrap(),
+        assert_eq!(res.resolve_ref(&ObjRef { num: 3, gen: 0 }).unwrap(),
             Object::Number(Number::Int(1)));
-        assert_eq!(rdr.resolve_ref(&ObjRef { num: 4, gen: 0 }, &loc).unwrap(),
+        assert_eq!(res.resolve_ref(&ObjRef { num: 4, gen: 0 }).unwrap(),
             Object::Number(Number::Int(4)));
     }
 

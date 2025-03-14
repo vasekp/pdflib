@@ -86,18 +86,6 @@ impl<T: BufRead + Seek> FullReader<T> {
             .unwrap_or(&() as &dyn Locator)
     }
 
-    pub fn resolve_ref(&self, objref: &ObjRef, locator: &dyn Locator) -> Result<Object, Error> {
-        self.base.resolve_ref(objref, locator)
-    }
-
-    pub fn resolve_obj(&self, obj: Object, locator: &dyn Locator) -> Result<Object, Error> {
-        self.base.resolve_obj(obj, locator)
-    }
-
-    pub fn resolve_deep(&self, obj: Object, locator: &dyn Locator) -> Result<Object, Error> {
-        self.base.resolve_deep(obj, locator)
-    }
-
     pub fn read_stream_data(&self, obj: &Stream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error> {
         self.base.read_stream_data(obj, locator)
     }
@@ -116,6 +104,7 @@ mod tests {
     use super::*;
     use std::io::*;
     use std::fs::*;
+    use crate::reader::base::BorrowedResolver;
     use crate::parser::bp::ByteProvider;
 
     #[test]
@@ -131,7 +120,8 @@ mod tests {
             (Name::from(b"Kids"), Object::Array(vec![Object::Ref(ObjRef { num: 2, gen: 0 })])),
             (Name::from(b"Count"), Object::Number(Number::Int(1))),
         ])));
-        let kids = rdr.resolve_ref(&ObjRef { num: 2, gen: 0 }, &link).unwrap();
+        let res = BorrowedResolver { reader: &rdr.base, locator: &link };
+        let kids = res.resolve_ref(&ObjRef { num: 2, gen: 0 }).unwrap();
 
         let (oref, res) = iter.next().unwrap();
         let (obj, _) = res.unwrap();
@@ -195,7 +185,8 @@ mod tests {
         assert_eq!(Rc::as_ptr(x322.next.as_ref().unwrap()), Rc::as_ptr(&x87));
         assert!(x87.next.is_none());
 
-        let stm = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x87)
+        let stm = BorrowedResolver { reader: &rdr.base, locator: x87 }
+            .resolve_ref(&ObjRef { num: 1, gen: 0 })
             .unwrap()
             .into_stream()
             .unwrap();
@@ -205,7 +196,8 @@ mod tests {
         drop(data);
         assert_eq!(s, b"Test 1");
 
-        let stm = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x322)
+        let stm = BorrowedResolver { reader: &rdr.base, locator: x322 }
+            .resolve_ref(&ObjRef { num: 1, gen: 0 })
             .unwrap()
             .into_stream()
             .unwrap();
@@ -215,7 +207,8 @@ mod tests {
         drop(data);
         assert_eq!(s, b"Test 2");
 
-        let stm = rdr.resolve_ref(&ObjRef { num: 1, gen: 0 }, x510)
+        let stm = BorrowedResolver { reader: &rdr.base, locator: x510 }
+            .resolve_ref(&ObjRef { num: 1, gen: 0 })
             .unwrap()
             .into_stream()
             .unwrap();
