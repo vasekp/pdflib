@@ -71,6 +71,7 @@ fn main() -> Result<(), pdf::Error> {
                     continue;
                 };
                 let objref = find_page(&reader, &root, page_num)?;
+                println!("{}", objref);
                 curr_obj = reader.resolve_ref(&objref)?;
                 history.push(objref);
             },
@@ -149,7 +150,7 @@ fn find_page(reader: &pdf::reader::SimpleReader<BufReader<File>>, root: &pdf::Di
     let mut count = curr_node.lookup(b"Count").num_value()
         .ok_or(pdf::Error::Parse("Could not read page tree."))?;
     let err = || pdf::Error::Parse("Could not read page tree.");
-    loop {
+    'a: loop {
         if num >= count {
             return Err(pdf::Error::Parse("Page number out of range."));
         }
@@ -161,7 +162,7 @@ fn find_page(reader: &pdf::reader::SimpleReader<BufReader<File>>, root: &pdf::Di
             let objref = *kid.as_objref().ok_or(err())?;
             let node = reader.resolve_ref(&objref)?.into_dict().ok_or(err())?;
             if node.lookup(b"Parent") != &pdf::Object::Ref(curr_ref) {
-                return Err(pdf::Error::Parse("malformed page tree"));
+                return Err(pdf::Error::Parse("malformed page tree (/Parent)"));
             }
             use std::ops::Deref;
             let this_count = match node.lookup(b"Type")
@@ -172,13 +173,13 @@ fn find_page(reader: &pdf::reader::SimpleReader<BufReader<File>>, root: &pdf::Di
                         node.lookup(b"Count").num_value()
                             .ok_or(pdf::Error::Parse("Could not read page tree."))?,
                     b"Page" => 1,
-                    _ => return Err(pdf::Error::Parse("malformed page tree"))
+                    _ => return Err(pdf::Error::Parse("malformed page tree (/Type)"))
             };
             if this_count > num {
                 count = this_count;
                 curr_ref = objref;
                 curr_node = node;
-                continue;
+                continue 'a;
             } else {
                 num -= this_count;
             }
