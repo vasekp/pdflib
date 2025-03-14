@@ -40,6 +40,41 @@ pub fn decode<'a, R: BufRead + 'a>(input: R, filter: &[Filter], params: Option<&
     }
 }
 
+pub fn parse_filters(dict: &Dict, res: &impl Resolver) -> Result<Vec<Filter>, Error> {
+    let obj = dict.lookup(b"Filter");
+    let binding;
+    let obj_res = match obj {
+        Object::Ref(objref) => {
+            binding = res.resolve_ref(objref)?;
+            &binding
+        },
+        _ => obj
+    };
+    match obj_res {
+        Object::Name(name) => Ok(vec![name.try_into()?]),
+        Object::Array(vec) => {
+            let mut ret = Vec::new();
+            for item in vec {
+                let binding;
+                let item_res = match item {
+                    Object::Ref(objref) => {
+                        binding = res.resolve_ref(objref)?;
+                        &binding
+                    },
+                    _ => item
+                };
+                let filter = item_res.as_name()
+                    .ok_or(Error::Parse("malformed /Filter"))?
+                    .try_into()?;
+                ret.push(filter);
+            }
+            Ok(ret)
+        },
+        Object::Null => Ok(vec![]),
+        _ => Err(Error::Parse("malformed /Filter"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

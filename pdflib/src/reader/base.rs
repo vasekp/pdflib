@@ -7,7 +7,6 @@ use std::ops::Deref;
 use crate::base::*;
 use crate::base::types::*;
 use crate::parser::{FileParser, ObjParser};
-use crate::codecs::Filter;
 use crate::codecs;
 use crate::utils;
 
@@ -132,45 +131,12 @@ impl<T: BufRead + Seek> BaseReader<T> {
         })
     }
 
-    pub fn resolve_filters(&self, obj: &Object, locator: &dyn Locator) -> Result<Vec<Filter>, Error> {
-        let binding;
-        let obj_res = match obj {
-            Object::Ref(objref) => {
-                binding = self.resolve_ref(objref, locator)?;
-                &binding
-            },
-            _ => obj
-        };
-        match obj_res {
-            Object::Name(name) => Ok(vec![name.try_into()?]),
-            Object::Array(vec) => {
-                let mut ret = Vec::new();
-                for item in vec {
-                    let binding;
-                    let item_res = match item {
-                        Object::Ref(objref) => {
-                            binding = self.resolve_ref(objref, locator)?;
-                            &binding
-                        },
-                        _ => item
-                    };
-                    let filter = item_res.as_name()
-                        .ok_or(Error::Parse("malformed /Filter"))?
-                        .try_into()?;
-                    ret.push(filter);
-                }
-                Ok(ret)
-            },
-            Object::Null => Ok(vec![]),
-            _ => Err(Error::Parse("malformed /Filter"))
-        }
-    }
-
     pub fn read_stream_data(&self, obj: &Stream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error>
     {
         let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
+        let res = BorrowedResolver { reader: self, locator };
         let len = self.resolve_obj(obj.dict.lookup(b"Length").to_owned(), locator)?.num_value();
-        let filters = self.resolve_filters(obj.dict.lookup(b"Filter"), locator)?;
+        let filters = codecs::parse_filters(&obj.dict, &res)?;
         let params = match *obj.dict.lookup(b"DecodeParms") {
             Object::Dict(ref dict) => Some(dict),
             Object::Null => None,
@@ -232,11 +198,24 @@ impl<T: BufRead + Seek> Iterator for XRefIterator<'_, T> {
     }
 }
 
+struct BorrowedResolver<'a, T: BufRead + Seek> {
+    reader: &'a BaseReader<T>,
+    locator: &'a dyn Locator,
+}
+
+impl<T: BufRead + Seek> Resolver for BorrowedResolver<'_, T> {
+    fn resolve_ref(&self, objref: &ObjRef) -> Result<Object, Error> {
+        self.reader.resolve_ref(objref, self.locator)
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::io::*;
     use std::fs::*;
+    use crate::codecs::Filter;
 
     #[test]
     fn test_resolve_filters() {
