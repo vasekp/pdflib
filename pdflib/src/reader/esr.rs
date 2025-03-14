@@ -34,7 +34,7 @@ impl<T: BufRead> BufRead for EndstreamReader<T> {
         if self.cur_index < self.buf.len() {
             match self.endstream {
                 Some(end_index) => Ok(&self.buf[self.cur_index..end_index]),
-                None => Ok(&self.buf[..])
+                None => Ok(&self.buf[self.cur_index..])
             }
         } else {
             use crate::parser::bp::ByteProvider;
