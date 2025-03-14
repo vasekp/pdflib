@@ -2,6 +2,7 @@ use std::io::BufReader;
 use std::fs::File;
 
 use pdflib as pdf;
+use pdf::Resolver;
 
 fn main() -> Result<(), pdf::Error> {
     stderrlog::new()

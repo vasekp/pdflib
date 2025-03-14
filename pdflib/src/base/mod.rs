@@ -40,6 +40,9 @@ pub use xref::*;
 mod locator;
 pub use locator::*;
 
+mod resolver;
+pub use resolver::*;
+
 mod error;
 pub use error::*;
 

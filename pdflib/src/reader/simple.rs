@@ -64,23 +64,6 @@ impl<T: BufRead + Seek> SimpleReader<T> {
             })
     }
 
-    /// Resolves an [`ObjRef`] into an owned [`Object`].
-    pub fn resolve_ref(&self, objref: &ObjRef) -> Result<Object, Error> {
-        self.base.resolve_ref(objref, &self.xref)
-    }
-
-    /// For an [`Object::Ref`], calls [`SimpleReader::resolve_ref()`], otherwise returns `obj` 
-    /// unchanged.
-    pub fn resolve_obj(&self, obj: Object) -> Result<Object, Error> {
-        self.base.resolve_obj(obj, &self.xref)
-    }
-
-    /// Resolves indirect references like [`SimpleReader::resolve_obj()`], but also traverses to 
-    /// the first level in [`Object::Array`]s and [`Object::Dict`]s.
-    pub fn resolve_deep(&self, obj: Object) -> Result<Object, Error> {
-        self.base.resolve_deep(obj, &self.xref)
-    }
-
     /// Creates a `BufRead` reading stream data for a [`Stream`], after decoding using the values 
     /// of `/Filter` and `/DecodeParms` from the stream dictionary.
     ///
@@ -96,6 +79,12 @@ impl<T: BufRead + Seek> SimpleReader<T> {
     /// any other methods of this `SimpleReader`.
     pub fn read_stream_data(&self, obj: &Stream) -> Result<Box<dyn BufRead + '_>, Error> {
         self.base.read_stream_data(obj, &self.xref)
+    }
+}
+
+impl<T: BufRead + Seek> Resolver for SimpleReader<T> {
+    fn resolve_ref(&self, objref: &ObjRef) -> Result<Object, Error> {
+        self.base.resolve_ref(objref, &self.xref)
     }
 }
 
