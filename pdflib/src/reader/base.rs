@@ -113,11 +113,6 @@ impl<T: BufRead + Seek> BaseReader<T> {
         let res = BorrowedResolver { reader: self, locator };
         let len = res.resolve_obj(obj.dict.lookup(b"Length").to_owned())?.num_value();
         let filters = codecs::parse_filters(&obj.dict, &res)?;
-        let params = match *obj.dict.lookup(b"DecodeParms") {
-            Object::Dict(ref dict) => Some(dict),
-            Object::Null => None,
-            _ => return Err(Error::Parse("malformed /DecodeParms"))
-        };
         let reader = self.parser.read_raw(offset)?;
         let codec_in: Box<dyn BufRead> = match len {
             Some(len) => Box::new(reader.take(len)),
@@ -126,7 +121,7 @@ impl<T: BufRead + Seek> BaseReader<T> {
                 Box::new(EndstreamReader::new(reader))
             }
         };
-        let codec_out = codecs::decode(codec_in, &filters, params);
+        let codec_out = codecs::decode(codec_in, &filters);
         Ok(codec_out)
     }
 }
@@ -204,7 +199,7 @@ mod tests {
             .into_stream()
             .unwrap();
         let fil = codecs::parse_filters(&stm.dict, &res).unwrap();
-        assert_eq!(fil, vec![ Filter::AsciiHex, Filter::Flate ]);
+        assert_eq!(fil, vec![ Filter::AsciiHex, Filter::Flate(Dict::default()) ]);
 
         let mut data = rdr.read_stream_data(&stm, &xref).unwrap();
         let mut s = String::new();

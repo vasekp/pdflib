@@ -8,19 +8,22 @@ use std::io::BufRead;
 #[derive(Debug, PartialEq)]
 pub enum Filter {
     /// `/FlateDecode`
-    Flate,
+    Flate(Dict),
     /// `/ASCIIHexDecode`
     AsciiHex,
 }
 
-impl TryFrom<&Name> for Filter {
-    type Error = Error;
-
-    fn try_from(name: &Name) -> Result<Filter, Error> {
+impl Filter {
+    fn try_from(name: &Name, params: Option<Dict>) -> Result<Filter, Error> {
         use std::ops::Deref;
         match name.deref() {
-            b"FlateDecode" => Ok(Filter::Flate),
-            b"ASCIIHexDecode" => Ok(Filter::AsciiHex),
+            b"FlateDecode" => Ok(Filter::Flate(params.unwrap_or(Dict::default()))),
+            b"ASCIIHexDecode" => {
+                if params.is_some() {
+                    log::warn!("Ingoring /DecodeParms for /ASCIIHexDecode.");
+                }
+                Ok(Filter::AsciiHex)
+            },
             _ => Err(Error::Parse("unimplemented filter"))
         }
     }
@@ -31,30 +34,49 @@ impl TryFrom<&Name> for Filter {
 ///
 /// The latter needs to be provided as fully resolved objects. Moreover, the `filter` argument 
 /// needs to be provided in the form of an array of [`Filter`]s.
-pub fn decode<'a, R: BufRead + 'a>(input: R, filter: &[Filter], params: Option<&Dict>) -> Box<dyn BufRead + 'a> {
+pub fn decode<'a, R: BufRead + 'a>(input: R, filter: &[Filter]) -> Box<dyn BufRead + 'a> {
     match filter {
         [] => Box::new(input),
-        [Filter::Flate] => flate::decode(input, params.unwrap_or(&Dict::default())),
+        [Filter::Flate(params)] => flate::decode(input, params),
         [Filter::AsciiHex] => Box::new(asciihex::decode(input)),
-        [_, ..] => decode(decode(input, &filter[..1], params), &filter[1..], None),
+        [_, ..] => decode(decode(input, &filter[..1]), &filter[1..]),
     }
 }
 
 pub fn parse_filters(dict: &Dict, res: &impl Resolver) -> Result<Vec<Filter>, Error> {
-    let obj = dict.lookup(b"Filter");
+    let filter = dict.lookup(b"Filter");
+    let params = dict.lookup(b"DecodeParms").to_owned();
     let binding;
-    let obj_res = match obj {
+    let filter_res = match filter {
         Object::Ref(objref) => {
             binding = res.resolve_ref(objref)?;
             &binding
         },
-        _ => obj
+        _ => filter
     };
-    match obj_res {
-        Object::Name(name) => Ok(vec![name.try_into()?]),
-        Object::Array(vec) => {
+    match filter_res {
+        Object::Name(name) => {
+            let params = match params {
+                Object::Dict(dict) => Some(dict),
+                Object::Null => None,
+                _ => return Err(Error::Parse("malformed /DecodeParms"))
+            };
+            Ok(vec![Filter::try_from(name, params)?])
+        },
+        Object::Array(filters) => {
+            let params = match params {
+                Object::Null => None,
+                Object::Array(arr) => {
+                    if arr.len() != filters.len() {
+                        return Err(Error::Parse("malformed /DecodeParms"));
+                    }
+                    Some(arr)
+                },
+                _ => return Err(Error::Parse("malformed /DecodeParms"))
+            };
             let mut ret = Vec::new();
-            for item in vec {
+            let mut params_iter = params.map(IntoIterator::into_iter);
+            for item in filters {
                 let binding;
                 let item_res = match item {
                     Object::Ref(objref) => {
@@ -63,9 +85,13 @@ pub fn parse_filters(dict: &Dict, res: &impl Resolver) -> Result<Vec<Filter>, Er
                     },
                     _ => item
                 };
-                let filter = item_res.as_name()
-                    .ok_or(Error::Parse("malformed /Filter"))?
-                    .try_into()?;
+                let params = match params_iter.as_mut().and_then(Iterator::next) {
+                    Some(Object::Dict(dict)) => Some(dict),
+                    None | Some(Object::Null) => None,
+                    _ => return Err(Error::Parse("malformed /DecodeParms"))
+                };
+                let filter = Filter::try_from(item_res.as_name()
+                    .ok_or(Error::Parse("malformed /Filter"))?, params)?;
                 ret.push(filter);
             }
             Ok(ret)
@@ -84,7 +110,7 @@ mod tests {
     fn test_filter_chaining() {
         let data = "78 9c 2b 49 2d 2e 01 00 04 5d 01 c1";
         let input = Cursor::new(data);
-        let mut output = decode(input, &[Filter::AsciiHex, Filter::Flate], None);
+        let mut output = decode(input, &[Filter::AsciiHex, Filter::Flate(Dict::default())]);
         let mut data_out = String::new();
         output.read_to_string(&mut data_out).unwrap();
         assert_eq!(data_out, "test");
