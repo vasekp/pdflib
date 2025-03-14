@@ -56,6 +56,7 @@ impl<R: Read> PNGDecode<R> {
             },
             _ => unimplemented!("PNG predictor {enc}")
         }
+        self.index = 0;
         Ok(&self.prev_row)
     }
 }
@@ -65,7 +66,6 @@ impl<R: Read> BufRead for PNGDecode<R> {
         if self.index < self.prev_row.len() {
             Ok(&self.prev_row[self.index..])
         } else {
-            self.index = 0;
             self.read_row()
         }
     }
