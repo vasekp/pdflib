@@ -21,12 +21,16 @@ impl Locator for XRef {
     /// Returns `Some(record)` if the record is found in this table section and the generation 
     /// number agrees with `objref.gen`. Returns `Some(Record::default())` in cases of mismatch or 
     /// when the requested object number is out of bounds given by `/Size`, even if such record 
-    /// exists. Returns `None` if no record is present.
+    /// exists (a warning is emitted in such case). Returns `None` if no record is present.
     ///
     /// Recursive lookup through the update history is provided by other implementors, like the opaque 
     /// type returned by [`reader::FullReader::base_locator()`](crate::reader::FullReader::base_locator()).
     fn locate(&self, objref: &ObjRef) -> Option<Record> {
         if objref.num >= self.size {
+            if self.map.contains_key(&objref.num) {
+                log::warn!("Ignoring object number {} ≥ /Size ({}) even though its record exists.",
+                    objref.num, self.size);
+            }
             return Some(Record::default());
         }
         match self.map.get(&objref.num)? {
