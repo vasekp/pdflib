@@ -1,24 +1,24 @@
 use std::fmt::{Display, Debug, Formatter};
-use std::ops::Deref;
 
 /// Name objects (e.g., `/Pages`).
 ///
-/// Internally a `&[u8]`, to which it dereferences. NB that the leading `'/'` is not a part of the 
-/// name.
+/// The leading `/` is not stored as part of the name.
 #[derive(PartialEq, Clone)]
 pub struct Name(pub(crate) Vec<u8>);
+
+impl Name {
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> Vec<u8> {
+        self.0
+    }
+}
 
 impl From<&[u8]> for Name {
     fn from(s: &[u8]) -> Name {
         Name(s.to_owned())
-    }
-}
-
-impl Deref for Name {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -50,6 +50,8 @@ impl Debug for Name {
 }
 
 impl<T: AsRef<[u8]>> PartialEq<T> for Name {
+    /// Compares this `Name` to a byte string. Note that the leading `/` is not stored as part of 
+    /// the name and thus may not be included in the `other` string either.
     fn eq(&self, other: &T) -> bool {
         self.0 == other.as_ref()
     }

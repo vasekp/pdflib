@@ -17,7 +17,10 @@ impl Dict {
             .unwrap_or(&Object::Null)
     }
 
-    /// Consumes this `Dict` and returns its inner representation.
+    pub fn as_slice(&self) -> &Vec<(Name, Object)> {
+        &self.0
+    }
+
     pub fn into_inner(self) -> Vec<(Name, Object)> {
         self.0
     }
@@ -26,14 +29,6 @@ impl Dict {
 impl From<Vec<(Name, Object)>> for Dict {
     fn from(vec: Vec<(Name, Object)>) -> Dict {
         Dict(vec)
-    }
-}
-
-impl std::ops::Deref for Dict {
-    type Target = Vec<(Name, Object)>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 

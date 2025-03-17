@@ -18,8 +18,7 @@ pub enum Filter {
 
 impl Filter {
     fn try_from(name: &Name, params: Option<Dict>) -> Result<Filter, Error> {
-        use std::ops::Deref;
-        match name.deref() {
+        match name.as_slice() {
             b"FlateDecode" => Ok(Filter::Flate(params.unwrap_or(Dict::default()))),
             b"ASCIIHexDecode" => {
                 if params.is_some() {
