@@ -8,7 +8,7 @@ use std::io::BufRead;
 /// Supported PDF filters.
 #[derive(Debug, PartialEq)]
 pub enum Filter {
-    /// `/FlateDecode`
+    /// `/FlateDecode` (supporting `/DecodeParms`).
     Flate(Dict),
     /// `/ASCIIHexDecode`
     AsciiHex,
@@ -38,11 +38,7 @@ impl Filter {
     }
 }
 
-/// Wraps a `BufRead` in an adapter decoding the data according to the provided `/Filter` and 
-/// `/DecodeParms` configuration.
-///
-/// The latter needs to be provided as fully resolved objects. Moreover, the `filter` argument 
-/// needs to be provided in the form of an array of [`Filter`]s.
+/// Wraps a `BufRead` in an adapter decoding the data according to the provided filter chain.
 pub fn decode<'a, R: BufRead + 'a>(input: R, filter: &[Filter]) -> Box<dyn BufRead + 'a> {
     match filter {
         [] => Box::new(input),
@@ -53,6 +49,8 @@ pub fn decode<'a, R: BufRead + 'a>(input: R, filter: &[Filter]) -> Box<dyn BufRe
     }
 }
 
+/// Parse stream dictionary's `/Filter` and `/DecodeParms` entries into the form expected by 
+/// [`codecs::decode`](decode).
 pub fn parse_filters(dict: &Dict, res: &impl Resolver) -> Result<Vec<Filter>, Error> {
     let filter = dict.lookup(b"Filter");
     let params = dict.lookup(b"DecodeParms").to_owned();

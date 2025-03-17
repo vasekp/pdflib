@@ -1,5 +1,7 @@
 use super::*;
 
+/// This trait provides means of resolving indirect object references ([`ObjRef`]) into the 
+/// actual [`Object`]s.
 pub trait Resolver {
     /// Resolves an [`ObjRef`] into an owned [`Object`].
     fn resolve_ref(&self, objref: &ObjRef) -> Result<Object, Error>;
@@ -12,7 +14,7 @@ pub trait Resolver {
         }
     }
 
-    /// Resolves indirect references like [`SimpleReader::resolve_obj()`], but also traverses to 
+    /// Resolves indirect references like [`Self::resolve_obj()`], but also traverses to 
     /// the first level in [`Object::Array`]s and [`Object::Dict`]s.
     fn resolve_deep(&self, obj: Object) -> Result<Object, Error> {
         Ok(match self.resolve_obj(obj)? {
