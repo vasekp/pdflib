@@ -23,8 +23,7 @@ pub trait Resolver {
                     .map(|obj| self.resolve_obj(obj))
                     .collect::<Result<Vec<_>, _>>()?),
             Object::Dict(dict) =>
-                Object::Dict(Dict::from(dict.into_inner()
-                    .into_iter()
+                Object::Dict(Dict::from(dict.into_iter()
                     .map(|(name, obj)| -> Result<(Name, Object), Error> {
                         Ok((name, self.resolve_obj(obj)?))
                     })

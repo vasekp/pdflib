@@ -19,7 +19,7 @@ pub enum Filter {
 impl Filter {
     fn try_from(name: &Name, params: Option<Dict>) -> Result<Filter, Error> {
         match name.as_slice() {
-            b"FlateDecode" => Ok(Filter::Flate(params.unwrap_or(Dict::default()))),
+            b"FlateDecode" => Ok(Filter::Flate(params.unwrap_or_default())),
             b"ASCIIHexDecode" => {
                 if params.is_some() {
                     log::warn!("Ingoring /DecodeParms for /ASCIIHexDecode.");

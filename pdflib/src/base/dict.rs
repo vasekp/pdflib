@@ -12,23 +12,28 @@ impl Dict {
     /// to [`Object::Null`].
     pub fn lookup(&self, key: &[u8]) -> &Object {
         self.0.iter()
-            .find(|(name, _obj)| name == &key)
+            .find(|(name, _obj)| *name == key)
             .map(|(_name, obj)| obj)
             .unwrap_or(&Object::Null)
     }
 
-    pub fn as_slice(&self) -> &Vec<(Name, Object)> {
-        &self.0
-    }
-
-    pub fn into_inner(self) -> Vec<(Name, Object)> {
-        self.0
+    pub fn iter(&self) -> impl Iterator<Item = &(Name, Object)> {
+        self.0.iter()
     }
 }
 
 impl From<Vec<(Name, Object)>> for Dict {
     fn from(vec: Vec<(Name, Object)>) -> Dict {
         Dict(vec)
+    }
+}
+
+impl IntoIterator for Dict {
+    type Item = (Name, Object);
+    type IntoIter = <Vec<(Name, Object)> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 

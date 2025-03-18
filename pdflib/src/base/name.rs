@@ -49,7 +49,7 @@ impl Debug for Name {
     }
 }
 
-impl<T: AsRef<[u8]>> PartialEq<T> for Name {
+impl<T: AsRef<[u8]> + ?Sized> PartialEq<T> for Name {
     /// Compares this `Name` to a byte string. Note that the leading `/` is not stored as part of 
     /// the name and thus may not be included in the `other` string either.
     fn eq(&self, other: &T) -> bool {
