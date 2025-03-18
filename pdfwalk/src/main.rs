@@ -4,6 +4,19 @@ use std::fs::File;
 use pdflib as pdf;
 use pdf::Resolver;
 
+macro_rules! try_or_continue {
+    ($expr:expr) => {
+        match $expr {
+            Ok(val) => val,
+            Err(pdf::Error::Parse(err)) => {
+                log::error!("{err}");
+                continue;
+            },
+            Err(err) => return Err(err)
+        }
+    }
+}
+
 fn main() -> Result<(), pdf::Error> {
     stderrlog::new()
         .verbosity(log::Level::Trace)
@@ -41,12 +54,12 @@ fn main() -> Result<(), pdf::Error> {
             ["root"] => {
                 history.clear();
                 history.push(*root_ref);
-                curr_obj = reader.resolve_ref(root_ref)?;
+                curr_obj = try_or_continue!(reader.resolve_ref(root_ref));
             },
             ["up"] => {
                 history.pop();
                 if let Some(objref) = history.last() {
-                    curr_obj = reader.resolve_ref(objref)?;
+                    curr_obj = try_or_continue!(reader.resolve_ref(objref));
                 } else {
                     curr_obj = trailer();
                 }
@@ -56,23 +69,28 @@ fn main() -> Result<(), pdf::Error> {
                     log::error!("Not a stream object.");
                     continue;
                 };
-                let mut data = reader.read_stream_data(stm)?;
+                let mut data = try_or_continue!(reader.read_stream_data(stm));
                 let mut cmd = std::process::Command::new("less")
                     .stdin(std::process::Stdio::piped())
                     .arg("-R")
                     .spawn()?;
                 let mut stdin = cmd.stdin.as_ref().unwrap();
-                std::io::copy(&mut data, &mut stdin)?;
-                cmd.wait()?;
+                match std::io::copy(&mut data, &mut stdin) {
+                    Ok(_) => { cmd.wait()?; },
+                    Err(err) => {
+                        cmd.kill()?;
+                        log::error!("{err}");
+                    }
+                }
             },
             ["page", p2] => {
                 let Ok(page_num) = p2.parse::<usize>() else {
                     log::error!("Malformed page number.");
                     continue;
                 };
-                let objref = find_page(&reader, &root, page_num)?;
+                let objref = try_or_continue!(find_page(&reader, &root, page_num));
                 println!("{}", objref);
-                curr_obj = reader.resolve_ref(&objref)?;
+                curr_obj = try_or_continue!(reader.resolve_ref(&objref));
                 history.push(objref);
             },
             [p1, p2] => {
@@ -81,7 +99,7 @@ fn main() -> Result<(), pdf::Error> {
                     continue;
                 };
                 let objref = pdf::ObjRef { num, gen };
-                curr_obj = reader.resolve_ref(&objref)?;
+                curr_obj = try_or_continue!(reader.resolve_ref(&objref));
                 history.push(objref);
             },
             _ => log::error!("Unknown command.")
