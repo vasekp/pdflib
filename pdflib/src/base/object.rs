@@ -4,12 +4,15 @@ use super::name::Name;
 use super::dict::Dict;
 use super::number::Number;
 use super::string::format_string;
-use super::stream::{self, Stream};
+use super::stream::{self, Stream, StreamData};
 use super::types::*;
 
 /// The base type of all PDF objects.
+///
+/// This can come in two flavours, see [`stream::StreamData`]. For PDF reading applications, the 
+/// appropriate variant is `Data = Offset`, which is facilitated by the type alias [`Object`].
 #[derive(Debug, PartialEq, Clone)]
-pub enum Object {
+pub enum BaseObject<Data: StreamData> {
     /// Bool (`true` or `false`)
     Bool(bool),
     /// Numbers (integer or real)
@@ -21,154 +24,160 @@ pub enum Object {
     /// Name (like `/Length`)
     Name(Name),
     /// Array (`[1 2 3]`)
-    Array(Vec<Object>),
+    Array(Vec<Self>),
     /// Dictionary (`<< /Root 1 0 R >>`)
     Dict(Dict),
     /// Stream (`<< ... >> stream ... endstream`)
-    Stream(Stream<stream::ByRef>),
+    Stream(Stream<Data>),
     /// Indirect object reference (`3 0 R`)
     Ref(ObjRef),
     /// Null object (`null`). Also used as a fall-back where the specification says.
     Null
 }
 
-impl Object {
-    /// A utility method to create [`Object::String`] from a byte slice.
-    pub fn new_string(s: &[u8]) -> Object {
-        Object::String(s.to_owned())
+impl<Data: StreamData> BaseObject<Data> {
+    /// A utility method to create [`Self::String`] from a byte slice.
+    pub fn new_string(s: &[u8]) -> Self {
+        Self::String(s.to_owned())
     }
 
-    /// A utility method to create [`Object::Name`] from a byte slice. Don't pass the initial 
+    /// A utility method to create [`Self::Name`] from a byte slice. Don't pass the initial 
     /// `'/'` unless the name is actually supposed to start with `#2F`.
-    pub fn new_name(s: &[u8]) -> Object {
-        Object::Name(Name::from(s))
+    pub fn new_name(s: &[u8]) -> Self {
+        Self::Name(Name::from(s))
     }
 
     pub fn as_bool(&self) -> Option<bool> {
         match self {
-            &Object::Bool(val) => Some(val),
+            &BaseObject::Bool(val) => Some(val),
             _ => None
         }
     }
 
     pub fn as_string(&self) -> Option<&Vec<u8>> {
         match self {
-            Object::String(val) => Some(val),
+            Self::String(val) => Some(val),
             _ => None
         }
     }
 
     pub fn as_name(&self) -> Option<&Name> {
         match self {
-            Object::Name(val) => Some(val),
+            Self::Name(val) => Some(val),
             _ => None
         }
     }
 
-    pub fn as_array(&self) -> Option<&Vec<Object>> {
+    pub fn as_array(&self) -> Option<&Vec<Self>> {
         match self {
-            Object::Array(val) => Some(val),
+            Self::Array(val) => Some(val),
             _ => None
         }
     }
 
     pub fn as_dict(&self) -> Option<&Dict> {
         match self {
-            Object::Dict(val) => Some(val),
+            Self::Dict(val) => Some(val),
             _ => None
         }
     }
 
-    pub fn as_stream(&self) -> Option<&Stream<stream::ByRef>> {
+    pub fn as_stream(&self) -> Option<&Stream<Data>> {
         match self {
-            Object::Stream(val) => Some(val),
+            Self::Stream(val) => Some(val),
             _ => None
         }
     }
 
     pub fn as_objref(&self) -> Option<&ObjRef> {
         match self {
-            Object::Ref(val) => Some(val),
+            Self::Ref(val) => Some(val),
             _ => None
         }
     }
 
     pub fn into_string(self) -> Option<Vec<u8>> {
         match self {
-            Object::String(val) => Some(val),
+            Self::String(val) => Some(val),
             _ => None
         }
     }
 
     pub fn into_name(self) -> Option<Name> {
         match self {
-            Object::Name(val) => Some(val),
+            Self::Name(val) => Some(val),
             _ => None
         }
     }
 
-    pub fn into_array(self) -> Option<Vec<Object>> {
+    pub fn into_array(self) -> Option<Vec<Self>> {
         match self {
-            Object::Array(val) => Some(val),
+            Self::Array(val) => Some(val),
             _ => None
         }
     }
 
     pub fn into_dict(self) -> Option<Dict> {
         match self {
-            Object::Dict(val) => Some(val),
+            Self::Dict(val) => Some(val),
             _ => None
         }
     }
 
-    pub fn into_stream(self) -> Option<Stream<stream::ByRef>> {
+    pub fn into_stream(self) -> Option<Stream<Data>> {
         match self {
-            Object::Stream(val) => Some(val),
+            Self::Stream(val) => Some(val),
             _ => None
         }
     }
 
     pub fn into_objref(self) -> Option<ObjRef> {
         match self {
-            Object::Ref(val) => Some(val),
+            Self::Ref(val) => Some(val),
             _ => None
         }
     }
 
-    /// For `Object::Number(Number::Int(number))`, extracts the `number` and casts it into the 
+    /// For `Self::Number(Number::Int(number))`, extracts the `number` and casts it into the 
     /// required type. Returns `None` both for other types of objects and for value too large for the 
     /// type `T`.
     pub fn num_value<T: TryFrom<i64>>(&self) -> Option<T> {
         match self {
-            &Object::Number(Number::Int(num)) => num.try_into().ok(),
+            &Self::Number(Number::Int(num)) => num.try_into().ok(),
             _ => None
         }
     }
 }
 
-impl Display for Object {
+impl<Data: StreamData> Display for BaseObject<Data> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Object::Bool(true) => f.write_str("true"),
-            Object::Bool(false) => f.write_str("false"),
-            Object::Number(Number::Int(x)) => write!(f, "{x}"),
-            Object::Number(Number::Real(x)) => write!(f, "{x}"),
-            Object::String(s) => format_string(f, s),
-            Object::Name(name) => write!(f, "{}", name),
-            Object::Array(arr) => {
+            Self::Bool(true) => f.write_str("true"),
+            Self::Bool(false) => f.write_str("false"),
+            Self::Number(Number::Int(x)) => write!(f, "{x}"),
+            Self::Number(Number::Real(x)) => write!(f, "{x}"),
+            Self::String(s) => format_string(f, s),
+            Self::Name(name) => write!(f, "{}", name),
+            Self::Array(arr) => {
                 f.write_str("[ ")?;
                 for obj in arr {
                     write!(f, "{obj} ")?;
                 }
                 f.write_str("]")
             },
-            Object::Dict(dict) => write!(f, "{}", dict),
-            Object::Stream(stm) => write!(f, "{} [stream]", stm.dict),
-            Object::Ref(ObjRef{num, gen}) => write!(f, "{num} {gen} R"),
-            Object::Null => f.write_str("null")
+            Self::Dict(dict) => write!(f, "{}", dict),
+            Self::Stream(stm) => write!(f, "{} [stream]", stm.dict),
+            Self::Ref(ObjRef{num, gen}) => write!(f, "{num} {gen} R"),
+            Self::Null => f.write_str("null")
         }
     }
 }
+
+/// A shorthand for [`BaseObject<Offset>`].
+///
+/// In this variant the [`data`](Stream::data) field of the `Self::Stream` variant is an offset 
+/// into the PDF file. This is the logical default for all read-only scenarios.
+pub type Object = BaseObject<stream::ByRef>;
 
 /// An indirect object reference.
 #[derive(PartialEq, Debug, Clone, Copy)]

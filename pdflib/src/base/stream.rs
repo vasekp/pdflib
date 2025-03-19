@@ -1,6 +1,7 @@
 use super::*;
 use super::types::*;
 
+/// Used to implement a discriminator between by-reference and by-value stored streams.
 pub trait StreamData {}
 pub(crate) type ByRef = Offset;
 pub(crate) type ByVal = Vec<u8>;
