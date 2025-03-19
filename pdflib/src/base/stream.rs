@@ -2,6 +2,12 @@ use super::*;
 use super::types::*;
 
 /// Used to implement a discriminator between by-reference and by-value stored streams.
+///
+/// This is a marker trait intended to only be implemented for
+/// - [`Offset`] (i.e., `u64`), for references into an input file,
+/// - `Vec<u8>`, for stream data stored as part of the object itself.
+///
+/// These two types can then form the `data` field of a [`Stream`].
 pub trait StreamData {}
 pub(crate) type ByRef = Offset;
 pub(crate) type ByVal = Vec<u8>;
@@ -19,6 +25,8 @@ pub struct Stream<Data: StreamData> {
     /// The stream dictionary.
     pub dict: Dict,
     /// The stream data, or its offset in the file (relative to `%PDF`).
+    ///
+    /// See [`StreamData`] for more details.
     pub data: Data
 }
 
