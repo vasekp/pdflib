@@ -4,7 +4,7 @@ use super::name::Name;
 use super::dict::Dict;
 use super::number::Number;
 use super::string::format_string;
-use super::stream::Stream;
+use super::stream::{self, Stream};
 use super::types::*;
 
 /// The base type of all PDF objects.
@@ -25,7 +25,7 @@ pub enum Object {
     /// Dictionary (`<< /Root 1 0 R >>`)
     Dict(Dict),
     /// Stream (`<< ... >> stream ... endstream`)
-    Stream(Stream),
+    Stream(Stream<stream::ByRef>),
     /// Indirect object reference (`3 0 R`)
     Ref(ObjRef),
     /// Null object (`null`). Also used as a fall-back where the specification says.
@@ -79,7 +79,7 @@ impl Object {
         }
     }
 
-    pub fn as_stream(&self) -> Option<&Stream> {
+    pub fn as_stream(&self) -> Option<&Stream<stream::ByRef>> {
         match self {
             Object::Stream(val) => Some(val),
             _ => None
@@ -121,7 +121,7 @@ impl Object {
         }
     }
 
-    pub fn into_stream(self) -> Option<Stream> {
+    pub fn into_stream(self) -> Option<Stream<stream::ByRef>> {
         match self {
             Object::Stream(val) => Some(val),
             _ => None

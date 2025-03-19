@@ -1,23 +1,28 @@
 use super::*;
 use super::types::*;
 
+pub trait StreamData {}
+pub(crate) type ByRef = Offset;
+pub(crate) type ByVal = Vec<u8>;
+
+impl StreamData for ByRef {}
+
+impl StreamData for ByVal {}
+
 /// A PDF stream object.
+///
+/// The `Data` parameter may be either [`Offset`] for streams referring to an opened file or 
+/// `Vec<u8>` when the data is stored in a detached form.
 #[derive(Debug, PartialEq, Clone)]
-pub struct Stream {
+pub struct Stream<Data: StreamData> {
     /// The stream dictionary.
     pub dict: Dict,
-    /// The stream data. A reference or the full content may be stored. See [`Data`] for details.
+    /// The stream data, or its offset in the file (relative to `%PDF`).
     pub data: Data
 }
 
-/// The data type of [`Stream::data`].
-#[derive(Debug, PartialEq, Clone)]
-pub enum Data {
-    /// Reference to a file, given by offset from `%PDF`.
-    ///
-    /// NB that length is part of the stream dictionary ([`Stream::dict`]) and may be stored as an 
-    /// indirect object, potentionally even missing or wrong.
-    Ref(Offset),
-    /// The actual content, unfiltered, verbatim.
-    Val(Vec<u8>)
-}
+/// A shorthand for [`Stream<Offset>`].
+pub type RefStream = Stream<ByRef>;
+
+/// A shorthand for [`Stream<Vec<u8>>`].
+pub type OwnedStream = Stream<ByVal>;

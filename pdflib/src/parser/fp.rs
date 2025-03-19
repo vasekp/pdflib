@@ -182,7 +182,7 @@ impl<T: BufRead + Seek> FileParser<T> {
                     _ => return Err(Error::Parse("stream keyword not followed by proper EOL"))
                 };
                 let offset = reader.stream_position()?;
-                let stm = Stream { dict, data: Data::Ref(offset) };
+                let stm = RefStream { dict, data: offset };
                 Ok(Structural::Object(oref, Object::Stream(stm)))
             },
             _ => Err(Error::Parse("endobj not found"))
@@ -246,7 +246,7 @@ impl<T: BufRead + Seek> FileParser<T> {
 
     fn read_xref_stream(&self, oref: ObjRef, obj: Object) -> Result<XRef, Error> {
         let mut reader = self.reader.borrow_mut();
-        let Object::Stream(Stream{dict, data: Data::Ref(offset)}) = obj else {
+        let Object::Stream(RefStream{dict, data: offset}) = obj else {
             return Err(Error::Parse("malfomed xref"))
         };
         if dict.lookup(b"Type") != &Object::new_name(b"XRef") {
@@ -405,7 +405,7 @@ mod tests {
         let (oref, obj) = fp.read_obj_at(15).unwrap();
         assert_eq!(oref, ObjRef { num: 4, gen: 0 });
         let stm = obj.as_stream().unwrap();
-        assert_eq!(stm.data, Data::Ref(74));
+        assert_eq!(stm.data, 74);
 
         // xref instead of object
         assert!(fp.read_obj_at(1036).is_err());

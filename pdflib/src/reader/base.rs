@@ -107,13 +107,12 @@ impl<T: BufRead + Seek> BaseReader<T> {
         Ok(ObjStm { entries, source })
     }
 
-    pub fn read_stream_data(&self, obj: &Stream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error>
+    pub fn read_stream_data(&self, obj: &RefStream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error>
     {
-        let Data::Ref(offset) = obj.data else { panic!("read_stream_data called on detached Stream") };
         let res = BorrowedResolver { reader: self, locator };
         let len = res.resolve_obj(obj.dict.lookup(b"Length").to_owned())?.num_value();
         let filters = codecs::parse_filters(&obj.dict, &res)?;
-        let reader = self.parser.read_raw(offset)?;
+        let reader = self.parser.read_raw(obj.data)?;
         let codec_in: Box<dyn BufRead> = match len {
             Some(len) => Box::new(reader.take(len)),
             None => {

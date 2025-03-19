@@ -64,8 +64,8 @@ impl<T: BufRead + Seek> SimpleReader<T> {
             })
     }
 
-    /// Creates a `BufRead` reading stream data for a [`Stream`], after decoding using the values 
-    /// of `/Filter` and `/DecodeParms` from the stream dictionary.
+    /// Creates a `BufRead` reading stream data for a [`RefStream`], after decoding using the 
+    /// values of `/Filter` and `/DecodeParms` from the stream dictionary.
     ///
     /// If the length can not be determined (e.g. the `/Length` entry refers to a missing object), 
     /// the data is read until the first occurrence of the `endstream` keyword. A warning is 
@@ -77,7 +77,7 @@ impl<T: BufRead + Seek> SimpleReader<T> {
     /// Note that this is a mutable borrow of an internal `RefCell`, so in order to prevent runtime 
     /// borrow checking failures, you may need to manually `drop()` the instance prior to calling 
     /// any other methods of this `SimpleReader`.
-    pub fn read_stream_data(&self, obj: &Stream) -> Result<Box<dyn BufRead + '_>, Error> {
+    pub fn read_stream_data(&self, obj: &RefStream) -> Result<Box<dyn BufRead + '_>, Error> {
         self.base.read_stream_data(obj, &self.xref)
     }
 }

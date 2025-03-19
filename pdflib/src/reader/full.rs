@@ -86,7 +86,7 @@ impl<T: BufRead + Seek> FullReader<T> {
             .unwrap_or(&() as &dyn Locator)
     }
 
-    pub fn read_stream_data(&self, obj: &Stream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error> {
+    pub fn read_stream_data(&self, obj: &RefStream, locator: &dyn Locator) -> Result<Box<dyn BufRead + '_>, Error> {
         self.base.read_stream_data(obj, locator)
     }
 }
