@@ -138,8 +138,13 @@ fn main() -> Result<(), pdf::Error> {
                         }
                     }
                 }
-                subobj.print_indented(0);
-                continue;
+                if let &pdf::Object::Ref(objref) = subobj {
+                    curr_obj = try_or_continue!(reader.resolve_ref(&objref));
+                    history.push(objref);
+                } else {
+                    subobj.print_indented(0);
+                    continue;
+                }
             },
             [p1, p2] => {
                 let (Ok(num), Ok(gen)) = (p1.parse::<pdf::ObjNum>(), p2.parse::<pdf::ObjGen>()) else {
