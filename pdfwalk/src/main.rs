@@ -43,7 +43,7 @@ fn main() -> Result<(), pdf::Error> {
         .into_dict()
         .ok_or(pdf::Error::Parse("Could not find /Root."))?;
 
-    for line in std::io::stdin().lines() {
+    'main: for line in std::io::stdin().lines() {
         let line = line?;
         let parts = line.split(' ').collect::<Vec<_>>();
         match parts[..] {
@@ -92,6 +92,54 @@ fn main() -> Result<(), pdf::Error> {
                 println!("{}", objref);
                 curr_obj = try_or_continue!(reader.resolve_ref(&objref));
                 history.push(objref);
+            },
+            [part, ref rest @ ..] if part.starts_with('/') || part.starts_with('[') => {
+                let mut subobj = &curr_obj;
+                for spec in std::iter::once(part).chain(rest.into_iter().map(std::ops::Deref::deref)) {
+                    let bs = spec.as_bytes();
+                    match bs[0] {
+                        b'/' => {
+                            let dict = match subobj {
+                                pdf::Object::Dict(ref dict) | pdf::Object::Stream(pdf::Stream { ref dict, .. }) => dict,
+                                _ => {
+                                    log::error!("{subobj}: Not a dictionary.");
+                                    continue 'main;
+                                }
+                            };
+                            subobj = dict.lookup(&bs[1..]);
+                        },
+                        b'[' => {
+                            if bs[bs.len() - 1] != b']' {
+                                log::error!("Malformed command.");
+                                continue 'main;
+                            }
+                            let index = match std::str::from_utf8(&bs[1..(bs.len() - 1)])
+                                    .expect("string from stdin should have a valid UTF substring")
+                                    .parse::<usize>() {
+                                Ok(num) => num,
+                                Err(_) => {
+                                    log::error!("Malformed command.");
+                                    continue 'main;
+                                }
+                            };
+                            if index == 0 {
+                                log::error!("Malformed index (should be 1-based).");
+                                continue 'main;
+                            }
+                            let pdf::Object::Array(ref arr) = subobj else {
+                                log::error!("{subobj}: Not an array.");
+                                continue 'main;
+                            };
+                            subobj = arr.get(index - 1).unwrap_or(&pdf::Object::Null);
+                        },
+                        _ => {
+                            log::error!("Malformed command.");
+                            continue 'main;
+                        }
+                    }
+                }
+                subobj.print_indented(0);
+                continue;
             },
             [p1, p2] => {
                 let (Ok(num), Ok(gen)) = (p1.parse::<pdf::ObjNum>(), p2.parse::<pdf::ObjGen>()) else {
