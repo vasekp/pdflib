@@ -183,8 +183,8 @@ impl PrettyPrint for Vec<pdf::Object> {
     fn print_indented(&self, indent: usize) {
         let ind = Self::SPACES.repeat(indent);
         println!("[");
-        for item in self {
-            print!("{ind}{}", Self::SPACES);
+        for (index, item) in self.iter().enumerate() {
+            print!("{ind}{}[{}] ", Self::SPACES, index + 1);
             item.print_indented(indent + 1);
         }
         println!("{ind}]");
